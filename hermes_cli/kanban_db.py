@@ -555,6 +555,133 @@ def remove_board(slug: str, *, archive: bool = True) -> dict:
 # Data classes
 # ---------------------------------------------------------------------------
 
+def _parse_task_metadata(raw):
+    """Parse a task's JSON-encoded metadata blob.
+
+    patch-2026-05-07-B4: _parse_task_metadata helper (session 10). Returns the decoded dict on
+    success. Returns None for NULL/empty input or any decode failure
+    (defensive: don't propagate bad legacy data through from_row).
+    """
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return None
+    if isinstance(parsed, dict):
+        return parsed
+    return None
+
+
+
+def _parse_task_metadata(raw):
+    """Parse a task's JSON-encoded metadata blob.
+
+    patch-2026-05-07-B4: _parse_task_metadata helper (session 10). Returns the decoded dict on
+    success. Returns None for NULL/empty input or any decode failure
+    (defensive: don't propagate bad legacy data through from_row).
+    """
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return None
+    if isinstance(parsed, dict):
+        return parsed
+    return None
+
+
+def _parse_task_metadata(raw):
+    """Parse a task's JSON-encoded metadata blob.
+
+    patch-2026-05-07-B4: _parse_task_metadata helper (session 10). Returns the decoded dict on
+    success. Returns None for NULL/empty input or any decode failure
+    (defensive: don't propagate bad legacy data through from_row).
+    """
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return None
+    if isinstance(parsed, dict):
+        return parsed
+    return None
+
+
+def _parse_task_metadata(raw):
+    """Parse a task's JSON-encoded metadata blob.
+
+    patch-2026-05-07-B4: _parse_task_metadata helper (session 10). Returns the decoded dict on
+    success. Returns None for NULL/empty input or any decode failure
+    (defensive: don't propagate bad legacy data through from_row).
+    """
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return None
+    if isinstance(parsed, dict):
+        return parsed
+    return None
+
+
+def _parse_task_metadata(raw):
+    """Parse a task's JSON-encoded metadata blob.
+
+    patch-2026-05-07-B4: _parse_task_metadata helper (session 10). Returns the decoded dict on
+    success. Returns None for NULL/empty input or any decode failure
+    (defensive: don't propagate bad legacy data through from_row).
+    """
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return None
+    if isinstance(parsed, dict):
+        return parsed
+    return None
+
+
+def _parse_task_metadata(raw):
+    """Parse a task's JSON-encoded metadata blob.
+
+    patch-2026-05-07-B4: _parse_task_metadata helper (session 10). Returns the decoded dict on
+    success. Returns None for NULL/empty input or any decode failure
+    (defensive: don't propagate bad legacy data through from_row).
+    """
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return None
+    if isinstance(parsed, dict):
+        return parsed
+    return None
+
+
+def _parse_task_metadata(raw):
+    """Parse a task's JSON-encoded metadata blob.
+
+    patch-2026-05-07-B4: _parse_task_metadata helper (session 10). Returns the decoded dict on
+    success. Returns None for NULL/empty input or any decode failure
+    (defensive: don't propagate bad legacy data through from_row).
+    """
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return None
+    if isinstance(parsed, dict):
+        return parsed
+    return None
+
+
 @dataclass
 class Task:
     """In-memory view of a row from the ``tasks`` table."""
@@ -606,6 +733,11 @@ class Task:
     # ``kanban.failure_limit`` config, and then to ``DEFAULT_FAILURE_LIMIT``.
     # Name matches the ``--max-retries`` CLI flag on ``kanban create``.
     max_retries: Optional[int] = None
+    # Free-form JSON dict for structured handoff facts written at
+    # kanban_create time (lifecycle chain metadata transport). Decoded
+    # from the JSON blob stored in the DB; None means no metadata was
+    # provided. Keys/values are arbitrary -- consumers cast as needed.
+    metadata: Optional[dict] = None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "Task":
@@ -670,6 +802,7 @@ class Task:
             max_retries=(
                 row["max_retries"] if "max_retries" in keys else None
             ),
+            metadata=_parse_task_metadata(row["metadata"]) if "metadata" in keys else None,
         )
 
 
@@ -796,7 +929,12 @@ CREATE TABLE IF NOT EXISTS tasks (
     -- ``max_retries=1`` blocks on the first failure. NULL (the common
     -- case) falls through to the dispatcher-level ``kanban.failure_limit``
     -- config and then ``DEFAULT_FAILURE_LIMIT``.
-    max_retries          INTEGER
+    max_retries          INTEGER,
+    -- Free-form JSON dict for structured handoff facts. Written by
+    -- orchestrators via kanban_create (lifecycle chain metadata transport)
+    -- and surfaced to downstream workers via build_worker_context.
+    -- NULL or empty dict means no metadata was provided.
+    metadata             TEXT
 );
 
 CREATE TABLE IF NOT EXISTS task_links (
@@ -1075,6 +1213,12 @@ def _migrate_add_optional_columns(conn: sqlite3.Connection) -> None:
         # they were getting before the column existed).
         _add_column_if_missing(conn, "tasks", "max_retries", "max_retries INTEGER")
 
+    if "metadata" not in cols:
+        # Free-form JSON dict for structured handoff facts from orchestrators
+        # and callers of kanban_create. Added in patch-2026-05-11-B5.
+        # NULL is safe for existing rows (no metadata = empty handoff).
+        _add_column_if_missing(conn, "tasks", "metadata", "metadata TEXT")
+
     # task_events gained a run_id column; back-fill it as NULL for
     # historical events (they predate runs and can't be attributed).
     ev_cols = {row["name"] for row in conn.execute("PRAGMA table_info(task_events)")}
@@ -1231,6 +1375,7 @@ def create_task(
     max_runtime_seconds: Optional[int] = None,
     skills: Optional[Iterable[str]] = None,
     max_retries: Optional[int] = None,
+    metadata: Optional[dict] = None,  # patch-2026-05-11-B5: create_task metadata kwarg
 ) -> str:
     """Create a new task and optionally link it under parent tasks.
 
@@ -1364,8 +1509,8 @@ def create_task(
                         id, title, body, assignee, status, priority,
                         created_by, created_at, workspace_kind, workspace_path,
                         tenant, idempotency_key, max_runtime_seconds, skills,
-                        max_retries
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        max_retries, metadata
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)  -- patch-2026-05-11-B6: INSERT metadata col
                     """,
                     (
                         task_id,
@@ -1383,6 +1528,7 @@ def create_task(
                         int(max_runtime_seconds) if max_runtime_seconds else None,
                         json.dumps(skills_list) if skills_list is not None else None,
                         int(max_retries) if max_retries is not None else None,
+                        json.dumps(metadata) if metadata is not None else None,
                     ),
                 )
                 for pid in parents:
@@ -1817,14 +1963,81 @@ def recompute_ready(conn: sqlite3.Connection) -> int:
 
     Returns the number of tasks promoted.  Safe to call inside or outside
     an existing transaction; it opens its own IMMEDIATE txn.
+
+    # patch-2026-05-08-E: cascade routing through orchestrator
+    # When a child auto-promotes (parent dependency satisfied) and is not
+    # already lifecycle-tagged, rewrite assignee + skills + metadata so
+    # the orchestrator chain claims it instead of the default kanban-worker.
+    # Without this, parent-close cascades bypass the lifecycle's gates.
+    # Anchored: arch doc S3.1(d), drift #1 from session 12 findings.
     """
+    # patch-2026-05-08-E lifecycle-tagged skill set. A task carrying any
+    # of these is considered already routed through the lifecycle and is
+    # NOT re-routed on promotion.
+    LIFECYCLE_SKILLS = frozenset({
+        "lifecycle-orchestrator", "specifier", "grill-me", "evaluate",
+        "write-prd", "tdd", "do-work", "session-end", "post-merge",
+        "starrco-postmerge-trigger",
+    })
+
+    def _is_lifecycle_tagged(skills_blob, assignee):
+        # The orchestrator domain is canonical entry; tasks living there
+        # are by-design lifecycle-managed even with empty skills.
+        if assignee == "hermes":
+            return True
+        if not skills_blob:
+            return False
+        try:
+            skills = json.loads(skills_blob)
+        except (ValueError, TypeError):
+            return False
+        if not isinstance(skills, list):
+            return False
+        return bool(set(skills) & LIFECYCLE_SKILLS)
+
+    def _stash_malformed_metadata_blob(blob):
+        # Codex R3 fix: replace raw-blob preservation with sha256
+        # fingerprint + length. Avoids re-exposing secrets that may live
+        # in the malformed blob, while still letting an operator audit
+        # / locate the source.
+        import hashlib as _hl
+        if blob is None:
+            return {"_pre_reroute_metadata_malformed": True}
+        try:
+            raw_bytes = blob.encode("utf-8") if isinstance(blob, str) else bytes(blob)
+        except (UnicodeEncodeError, TypeError):
+            return {
+                "_pre_reroute_metadata_malformed": True,
+                "_pre_reroute_metadata_unicode_error": True,
+            }
+        return {
+            "_pre_reroute_metadata_malformed": True,
+            "_pre_reroute_metadata_sha256": _hl.sha256(raw_bytes).hexdigest(),
+            "_pre_reroute_metadata_len": len(raw_bytes),
+        }
+
     promoted = 0
+    # Codex R3: Cap re-route history to bound metadata growth on
+    # pathological demote/re-promote loops.
+    _CASCADE_ROUTE_HISTORY_MAX = 10
     with write_txn(conn):
+        # patch-2026-05-08-E: also fetch assignee / skills / metadata so
+        # the cascade-routing decision can be made inline. Reading three
+        # extra columns adds zero rows vs the prior id-only SELECT.
         todo_rows = conn.execute(
-            "SELECT id FROM tasks WHERE status = 'todo'"
+            "SELECT id, assignee, skills, metadata FROM tasks WHERE status = 'todo'"
         ).fetchall()
         for row in todo_rows:
             task_id = row["id"]
+            # Codex R3 LOW/MEDIUM fix: discriminate cascade vs parentless via
+            # task_links link existence, NOT joined parent-row count. Joined
+            # parent rows can be empty if a parent was archived/deleted while
+            # the link row survived; that's still a genuine dependency child,
+            # not a parentless operator-managed task.
+            link_count = conn.execute(
+                "SELECT COUNT(*) FROM task_links WHERE child_id = ?",
+                (task_id,),
+            ).fetchone()[0]
             parents = conn.execute(
                 "SELECT t.status FROM tasks t "
                 "JOIN task_links l ON l.parent_id = t.id "
@@ -1832,6 +2045,80 @@ def recompute_ready(conn: sqlite3.Connection) -> int:
                 (task_id,),
             ).fetchall()
             if all(p["status"] == "done" for p in parents):
+                # patch-2026-05-08-E: route auto-cascade through orchestrator.
+                # Only rewrite tasks that have at least one task_links entry
+                # as a child (i.e. genuine cascade-promoted children).
+                # `bool(parents)` would miss the orphaned-parent edge case;
+                # `link_count > 0` catches it. Codex R3 LOW/MEDIUM fix.
+                is_cascade = link_count > 0
+                if is_cascade and not _is_lifecycle_tagged(row["skills"], row["assignee"]):
+                    try:
+                        existing_metadata = (
+                            json.loads(row["metadata"]) if row["metadata"] else {}
+                        )
+                        if not isinstance(existing_metadata, dict):
+                            # Codex R3 MEDIUM fix: malformed metadata gets a
+                            # SHA256 fingerprint + length, NOT the raw bytes.
+                            # The raw blob can contain secrets; storing it
+                            # under a known key would re-expose them via any
+                            # tool surface that reads task.metadata.
+                            existing_metadata = _stash_malformed_metadata_blob(
+                                row["metadata"]
+                            )
+                    except (ValueError, TypeError):
+                        existing_metadata = _stash_malformed_metadata_blob(
+                            row["metadata"]
+                        )
+                    try:
+                        original_skills = (
+                            json.loads(row["skills"]) if row["skills"] else []
+                        )
+                        if not isinstance(original_skills, list):
+                            original_skills = []
+                    except (ValueError, TypeError):
+                        original_skills = []
+                    # Codex R2 MEDIUM #2: do not silently overwrite an existing
+                    # original_cascade_assignee from a prior re-route. If the
+                    # task was demoted back to todo after being rerouted (e.g.
+                    # via link_tasks adding a fresh parent) and is now promoted
+                    # again, preserve the earlier hint and append history.
+                    if "original_cascade_assignee" in existing_metadata:
+                        history = existing_metadata.setdefault(
+                            "_cascade_route_history", []
+                        )
+                        if isinstance(history, list):
+                            history.append({
+                                "original_cascade_assignee":
+                                    existing_metadata.get("original_cascade_assignee"),
+                                "cascade_routed_at":
+                                    existing_metadata.get("cascade_routed_at"),
+                            })
+                            # Codex R3 MEDIUM fix: cap history size.
+                            if len(history) > _CASCADE_ROUTE_HISTORY_MAX:
+                                existing_metadata["_cascade_route_history"] = (
+                                    history[-_CASCADE_ROUTE_HISTORY_MAX:]
+                                )
+                    existing_metadata["original_cascade_assignee"] = row["assignee"]
+                    existing_metadata["cascade_routed_at"] = int(time.time())
+                    conn.execute(
+                        "UPDATE tasks SET assignee = ?, skills = ?, metadata = ? "
+                        "WHERE id = ? AND status = 'todo'",
+                        (
+                            "hermes",
+                            json.dumps(["lifecycle-orchestrator"]),
+                            json.dumps(existing_metadata, ensure_ascii=False),
+                            task_id,
+                        ),
+                    )
+                    _append_event(
+                        conn,
+                        task_id,
+                        "rerouted_to_orchestrator",
+                        {
+                            "original_assignee": row["assignee"],
+                            "original_skills": original_skills,
+                        },
+                    )
                 conn.execute(
                     "UPDATE tasks SET status = 'ready' WHERE id = ? AND status = 'todo'",
                     (task_id,),
@@ -2216,6 +2503,15 @@ def _verify_created_cards(
     * ``created_by`` matches the completing task's ``assignee`` profile
       (the common case: worker A spawns a card via ``kanban_create``,
       which stamps ``created_by=A``).
+    * ``created_by`` matches the *resolved* dispatch profile for the
+      completing task's assignee. This handles the lifecycle-orchestrator
+      pattern where the task assignee is a domain alias (e.g. ``"hermes"``)
+      that maps to an underlying Hermes profile (e.g. ``"starrco"``). The
+      dispatcher sets ``HERMES_PROFILE`` to the resolved profile name, so
+      ``kanban_create`` stamps ``created_by="starrco"`` while the task row
+      stores ``assignee="hermes"``. Without this condition every
+      orchestrator completion would be falsely rejected as a hallucination
+      (F-17 false-positive bug).
     * ``created_by`` matches the completing task's id (edge case where
       a worker passed its own task id as the ``created_by`` value).
     * The card is linked as a ``task_links.child`` of the completing
@@ -2225,7 +2521,7 @@ def _verify_created_cards(
       the completing task by the worker.
 
     ``phantom`` returns ids that either don't exist at all, or exist
-    but don't satisfy any of the three trust conditions. The caller
+    but don't satisfy any of the four trust conditions. The caller
     decides what to do with each bucket; this helper never mutates.
     """
     claimed = [str(x).strip() for x in (claimed_ids or []) if str(x).strip()]
@@ -2247,6 +2543,21 @@ def _verify_created_cards(
         return [], ordered
     completing_assignee = row["assignee"]
 
+    # Resolve the assignee through kanban_assignee_map so domain aliases
+    # (build / projects / hermes / kb / etc.) match the underlying profile
+    # name that the dispatcher stamps as created_by. Defensive: any import
+    # or read failure falls through to None (trust condition 2 simply
+    # won't fire — existing behaviour is preserved).
+    resolved_assignee: Optional[str] = None
+    if completing_assignee:
+        try:
+            from hermes_cli.profiles import resolve_dispatch_profile
+            candidate = resolve_dispatch_profile(completing_assignee)
+            if candidate and candidate != completing_assignee:
+                resolved_assignee = candidate
+        except Exception:
+            pass  # profiles module unavailable; skip condition 2
+
     # Batch-fetch existence + created_by in one query.
     placeholders = ",".join(["?"] * len(ordered))
     rows = conn.execute(
@@ -2266,12 +2577,19 @@ def _verify_created_cards(
         if created_by is None:
             phantom.append(cid)
             continue
-        # Accept if any of the three trust conditions holds.
+        # Accept if any of the four trust conditions holds.
         if completing_assignee and created_by == completing_assignee:
+            # Condition 1: created_by matches the raw assignee.
+            verified.append(cid)
+        elif resolved_assignee and created_by == resolved_assignee:
+            # Condition 2: created_by matches the resolved dispatch profile.
+            # Covers the lifecycle-orchestrator alias pattern (F-17).
             verified.append(cid)
         elif created_by == completing_task_id:
+            # Condition 3: edge case — worker used its task id as created_by.
             verified.append(cid)
         elif cid in linked_children:
+            # Condition 4: card is explicitly linked as a child of this task.
             verified.append(cid)
         else:
             phantom.append(cid)
@@ -2586,7 +2904,7 @@ def block_task(
                        claim_expires= NULL,
                        worker_pid   = NULL
                  WHERE id = ?
-                   AND status IN ('running', 'ready')
+                   AND status IN ('triage', 'todo', 'running', 'ready')  -- patch-2026-05-08-G: drift #6 (allow operator block on triage/todo)
                 """,
                 (task_id,),
             )
@@ -3772,16 +4090,31 @@ def dispatch_once(
         # the task would loop back to ``ready`` on next tick, and we'd
         # burn CPU forever (#kanban-dispatcher-crash-loop 2026-05-05).
         try:
-            from hermes_cli.profiles import profile_exists  # local import: avoids cycle
+            from hermes_cli.profiles import (
+                profile_exists,
+                resolve_dispatch_profile,
+            )  # local import: avoids cycle
         except Exception:
             profile_exists = None  # type: ignore[assignment]
-        if profile_exists is not None and not profile_exists(row["assignee"]):
-            # Bucket separately from skipped_unassigned: the operator
-            # cannot fix this by assigning a profile (the assignee IS the
-            # intended owner — a terminal lane). Health telemetry uses
-            # this distinction to suppress spurious "stuck" warnings on
-            # multi-lane setups where the ready queue is steadily full
-            # of human-pulled work.
+            resolve_dispatch_profile = None  # type: ignore[assignment]
+        # patch-2026-05-07-B7: dispatcher gate via map — resolve via kanban_assignee_map BEFORE
+        # the profile_exists check. Domain-named assignees (build,
+        # projects, agent, kb, hermes, contracts, etc.) map to an
+        # underlying profile (typically "starrco") via the active
+        # profile's config; without this resolution the gate would
+        # filter them as non-spawnable terminal lanes. Added 2026-05-07.
+        if profile_exists is not None and resolve_dispatch_profile is not None:
+            resolved_assignee = resolve_dispatch_profile(row["assignee"])
+            if not profile_exists(resolved_assignee):
+                # Bucket separately from skipped_unassigned: even after
+                # the map resolution, no profile owns this assignee.
+                # Either a typo or a genuine terminal lane (interactive
+                # Claude Code terminal pulled by a human via claim_task).
+                result.skipped_nonspawnable.append(row["id"])
+                continue
+        elif profile_exists is not None and not profile_exists(row["assignee"]):
+            # Defensive fallback if resolve_dispatch_profile failed to
+            # import: same gate as before, no map consultation.
             result.skipped_nonspawnable.append(row["id"])
             continue
         if dry_run:
@@ -3911,9 +4244,14 @@ def _default_spawn(
     if not task.assignee:
         raise ValueError(f"task {task.id} has no assignee")
 
-    from hermes_cli.profiles import normalize_profile_name
+    # patch-2026-05-07-B8: _default_spawn resolve + DOMAIN env — resolve via
+    # kanban_assignee_map so domain-named assignees (build/projects/
+    # agent/kb/hermes/...) spawn under the mapped underlying profile.
+    # Set HERMES_KANBAN_DOMAIN to the *original* assignee so the worker
+    # can load the right sub-module CLAUDE.md per §3.1(d).
+    from hermes_cli.profiles import resolve_dispatch_profile
 
-    profile_arg = normalize_profile_name(task.assignee)
+    profile_arg = resolve_dispatch_profile(task.assignee)
 
     prompt = f"work kanban task {task.id}"
     env = dict(os.environ)
@@ -3921,6 +4259,9 @@ def _default_spawn(
         env["HERMES_TENANT"] = task.tenant
     env["HERMES_KANBAN_TASK"] = task.id
     env["HERMES_KANBAN_WORKSPACE"] = workspace
+    # Original assignee preserved for domain-aware context loading.
+    # Workers read this to pick the right sub-module CLAUDE.md.
+    env["HERMES_KANBAN_DOMAIN"] = task.assignee or ""
     if task.current_run_id is not None:
         env["HERMES_KANBAN_RUN_ID"] = str(task.current_run_id)
     if task.claim_lock:

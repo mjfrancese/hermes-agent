@@ -258,6 +258,11 @@ def _handle_show(args: dict, **kw) -> str:
                     "completed_at": t.completed_at,
                     "result": t.result,
                     "current_run_id": t.current_run_id,
+                    # patch-2026-05-07-C3: _task_dict metadata + skills + model_override — surface task-level
+                    # fields skill workers need for the §4.4 contract.
+                    "metadata": t.metadata,
+                    "skills": t.skills,
+                    "model_override": getattr(t, "model_override", None),
                 }
 
             def _run_dict(r):
@@ -577,6 +582,11 @@ def _handle_create(args: dict, **kw) -> str:
         return tool_error(bool_error)
     idempotency_key = args.get("idempotency_key")
     max_runtime_seconds = args.get("max_runtime_seconds")
+    metadata = args.get("metadata")  # patch-2026-05-11-C1: _handle_create reads metadata
+    if metadata is not None and not isinstance(metadata, dict):
+        return tool_error(
+            f"metadata must be an object/dict, got {type(metadata).__name__}"
+        )
     skills = args.get("skills")
     if isinstance(skills, str):
         # Accept a single skill name as a string for convenience.
@@ -611,6 +621,7 @@ def _handle_create(args: dict, **kw) -> str:
                     if max_runtime_seconds is not None else None
                 ),
                 skills=skills,
+                metadata=metadata,  # patch-2026-05-11-C2: kb.create_task metadata kwarg
                 created_by=os.environ.get("HERMES_PROFILE") or "worker",
             )
             new_task = kb.get_task(conn, new_tid)

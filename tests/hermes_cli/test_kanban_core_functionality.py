@@ -3609,6 +3609,107 @@ def test_complete_can_retry_after_phantom_rejection(kanban_home):
         conn.close()
 
 
+def test_complete_accepts_cards_created_by_resolved_dispatch_profile(
+    kanban_home, monkeypatch,
+):
+    """Regression test for F-17: lifecycle-orchestrator false-positive.
+
+    When a task's assignee is a domain alias that maps to an underlying
+    profile via kanban_assignee_map, kanban_create stamps created_by with
+    the *resolved* profile (from HERMES_PROFILE env), not the alias. The
+    verifier must accept these cards even though created_by != assignee.
+
+    Scenario: task.assignee = "hermes", HERMES_PROFILE (resolved) = "starrco".
+    Card created_by = "starrco". Should be accepted, not phantom.
+    """
+    # Patch resolve_dispatch_profile directly so the test does not need
+    # to write a real config.yaml or change HERMES_HOME (which would
+    # point kanban_db.connect at a fresh uninitialized DB path).
+    import hermes_cli.kanban_db as _kb_mod
+
+    original_verify = _kb_mod._verify_created_cards
+
+    def patched_resolve_dispatch(assignee, profile_dir=None):
+        # Simulate: kanban_assignee_map = {hermes: starrco}
+        mapping = {"hermes": "starrco"}
+        return mapping.get(assignee, assignee)
+
+    # Monkey-patch at the profiles module level so the local import inside
+    # _verify_created_cards picks up the stub.
+    from hermes_cli import profiles as _profiles
+    monkeypatch.setattr(_profiles, "resolve_dispatch_profile", patched_resolve_dispatch)
+
+    conn = kb.connect()
+    try:
+        # Orchestrator task: assignee = domain alias "hermes".
+        orch = kb.create_task(conn, title="orchestrator", assignee="hermes")
+        # Child created with created_by = resolved profile "starrco"
+        # (what the dispatcher sets via HERMES_PROFILE).
+        c1 = kb.create_task(
+            conn, title="grill-me phase", assignee="hermes", created_by="starrco",
+        )
+        c2 = kb.create_task(
+            conn, title="write-prd phase", assignee="hermes", created_by="starrco",
+        )
+
+        # Completion should succeed -- cards were created by the resolved profile.
+        ok = kb.complete_task(
+            conn, orch,
+            summary="decomposed chain into c1 + c2",
+            created_cards=[c1, c2],
+        )
+        assert ok is True, "completion should succeed when created_by == resolved profile"
+
+        import json as _json
+        row = conn.execute(
+            "SELECT payload FROM task_events "
+            "WHERE task_id=? AND kind='completed' ORDER BY id DESC LIMIT 1",
+            (orch,),
+        ).fetchone()
+        assert row is not None
+        payload = _json.loads(row["payload"])
+        assert c1 in payload.get("verified_cards", [])
+        assert c2 in payload.get("verified_cards", [])
+        assert payload.get("phantom_cards", []) == []
+    finally:
+        conn.close()
+
+
+def test_complete_resolved_profile_does_not_extend_trust_to_other_profiles(
+    kanban_home, monkeypatch,
+):
+    """Guard against over-reach: a card created by an unrelated profile
+    must still be rejected even if the assignee has a mapped alias.
+
+    Assignee "hermes" -> "starrco". Card created_by = "bob". Should phantom.
+    """
+    from hermes_cli import profiles as _profiles
+
+    def patched_resolve_dispatch(assignee, profile_dir=None):
+        mapping = {"hermes": "starrco"}
+        return mapping.get(assignee, assignee)
+
+    monkeypatch.setattr(_profiles, "resolve_dispatch_profile", patched_resolve_dispatch)
+
+    conn = kb.connect()
+    try:
+        orch = kb.create_task(conn, title="orchestrator", assignee="hermes")
+        unrelated = kb.create_task(
+            conn, title="other", assignee="x", created_by="bob",
+        )
+
+        import pytest as _pytest
+        with _pytest.raises(kb.HallucinatedCardsError) as excinfo:
+            kb.complete_task(
+                conn, orch,
+                summary="wrongly claiming unrelated card",
+                created_cards=[unrelated],
+            )
+        assert excinfo.value.phantom == [unrelated]
+    finally:
+        conn.close()
+
+
 def test_complete_prose_scan_flags_nonexistent_ids(kanban_home):
     """Successful completion whose summary references a ``t_<hex>`` id
     that doesn't resolve emits a ``suspected_hallucinated_references``
