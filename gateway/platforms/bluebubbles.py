@@ -348,6 +348,11 @@ class BlueBubblesAdapter(BasePlatformAdapter):
         it will send events.  Checks for an existing registration first
         to avoid duplicates (e.g. after a crash without clean shutdown).
         """
+        # F-1a-skip-register: when the demux proxy owns BB Server
+        # registration, gateways must not register their loopback URLs.
+        if os.getenv("BLUEBUBBLES_SKIP_WEBHOOK_REGISTER", "").lower() in ("1", "true", "yes"):
+            logger.info("[bluebubbles] webhook registration skipped (BLUEBUBBLES_SKIP_WEBHOOK_REGISTER set)")
+            return True
         if not self.client:
             return False
 
@@ -392,6 +397,9 @@ class BlueBubblesAdapter(BasePlatformAdapter):
 
     async def _unregister_webhook(self) -> bool:
         """Unregister this webhook URL from the BlueBubbles server.
+        # F-1a-skip-register: mirror of _register_webhook early-return.
+        if os.getenv("BLUEBUBBLES_SKIP_WEBHOOK_REGISTER", "").lower() in ("1", "true", "yes"):
+            return False
 
         Removes *all* matching registrations to clean up any duplicates
         left by prior crashes.

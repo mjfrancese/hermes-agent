@@ -369,6 +369,10 @@ def _handle_show(args: dict, **kw) -> str:
                     "completed_at": t.completed_at,
                     "result": t.result,
                     "current_run_id": t.current_run_id,
+                    # patch-2026-05-07-C3: _task_dict metadata + skills + model_override — surface task-level
+                    # fields skill workers need for the §4.4 contract.
+                    "metadata": t.metadata,
+                    "skills": t.skills,
                     "model_override": t.model_override,
                 }
 
