@@ -260,6 +260,11 @@ class BlueBubblesAdapter(BasePlatformAdapter):
         it will send events.  Checks for an existing registration first
         to avoid duplicates (e.g. after a crash without clean shutdown).
         """
+        # F-1a-skip-register: when the demux proxy owns BB Server
+        # registration, gateways must not register their loopback URLs.
+        if os.getenv("BLUEBUBBLES_SKIP_WEBHOOK_REGISTER", "").lower() in ("1", "true", "yes"):
+            logger.info("[bluebubbles] webhook registration skipped (BLUEBUBBLES_SKIP_WEBHOOK_REGISTER set)")
+            return True
         if not self.client:
             return False
 
@@ -303,6 +308,9 @@ class BlueBubblesAdapter(BasePlatformAdapter):
 
     async def _unregister_webhook(self) -> bool:
         """Unregister this webhook URL from the BlueBubbles server.
+        # F-1a-skip-register: mirror of _register_webhook early-return.
+        if os.getenv("BLUEBUBBLES_SKIP_WEBHOOK_REGISTER", "").lower() in ("1", "true", "yes"):
+            return False
 
         Removes *all* matching registrations to clean up any duplicates
         left by prior crashes.
@@ -411,16 +419,10 @@ class BlueBubblesAdapter(BasePlatformAdapter):
         text = self.format_message(content)
         if not text:
             return SendResult(success=False, error="BlueBubbles send requires text")
-        # Split on paragraph breaks first (double newlines) so each thought
-        # becomes its own iMessage bubble, then truncate any that are still
-        # too long.
-        paragraphs = [p.strip() for p in re.split(r'\n\s*\n', text) if p.strip()]
-        chunks: List[str] = []
-        for para in (paragraphs or [text]):
-            if len(para) <= self.MAX_MESSAGE_LENGTH:
-                chunks.append(para)
-            else:
-                chunks.extend(self.truncate_message(para, max_length=self.MAX_MESSAGE_LENGTH))
+        # patch-2026-05-11-I: do NOT split on double newlines into separate bubbles.
+        # Single send keeps context together and avoids message barrages on the
+        # recipient's phone. Truncate only if the whole message exceeds the limit.
+        chunks: List[str] = self.truncate_message(text, max_length=self.MAX_MESSAGE_LENGTH)
         last = SendResult(success=True)
         for chunk in chunks:
             guid = await self._resolve_chat_guid(chat_id)
@@ -439,8 +441,12 @@ class BlueBubblesAdapter(BasePlatformAdapter):
                 "tempGuid": f"temp-{datetime.utcnow().timestamp()}",
                 "message": chunk,
             }
-            if reply_to and self._private_api_enabled and self._helper_connected:
+            # patch-2026-05-11-I: use private-api for all sends when available.
+            # Enables native iMessage formatting (bold, italic, etc.) and keeps
+            # the send path consistent with the reply path.
+            if self._private_api_enabled and self._helper_connected:
                 payload["method"] = "private-api"
+            if reply_to and self._private_api_enabled and self._helper_connected:
                 payload["selectedMessageGuid"] = reply_to
                 payload["partIndex"] = 0
             try:

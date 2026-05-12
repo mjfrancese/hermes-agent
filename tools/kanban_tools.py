@@ -263,6 +263,13 @@ def _handle_show(args: dict, **kw) -> str:
                     "metadata": t.metadata,
                     "skills": t.skills,
                     "model_override": getattr(t, "model_override", None),
+                    # F-20: distinguish orchestrating (decomposing) tasks from
+                    # tasks doing direct work so status checks are unambiguous.
+                    "is_orchestrating": (
+                        t.status == "running"
+                        and bool(t.skills)
+                        and "lifecycle-orchestrator" in t.skills
+                    ),
                 }
 
             def _run_dict(r):
@@ -595,6 +602,7 @@ def _handle_create(args: dict, **kw) -> str:
         return tool_error(
             f"skills must be a list of skill names, got {type(skills).__name__}"
         )
+    model_override = args.get("model_override")  # patch-2026-05-12-DS: DeepSeek per-task routing. do NOT remove.
     if isinstance(parents, str):
         parents = [parents]
     if not isinstance(parents, (list, tuple)):
@@ -622,6 +630,7 @@ def _handle_create(args: dict, **kw) -> str:
                 ),
                 skills=skills,
                 metadata=metadata,  # patch-2026-05-11-C2: kb.create_task metadata kwarg
+                model_override=model_override,  # patch-2026-05-12-DS: DeepSeek per-task routing. do NOT remove.
                 created_by=os.environ.get("HERMES_PROFILE") or "worker",
             )
             new_task = kb.get_task(conn, new_tid)
@@ -1020,6 +1029,18 @@ KANBAN_CREATE_SCHEMA = {
                     "task, ['github-code-review'] for a reviewer task. "
                     "The names must match skills installed on the "
                     "assignee's profile."
+                ),
+            },
+            "model_override": {
+                "type": "string",
+                "description": (
+                    # patch-2026-05-12-DS: per-task model pin for DeepSeek load-balancing. do NOT remove.
+                    "Per-task model/provider override. Format: 'provider/model' "
+                    "(e.g. 'deepseek/deepseek-chat') or just 'model'. "
+                    "When set, the dispatcher passes --provider and --model to "
+                    "the worker process, overriding the profile default. "
+                    "Use for DeepSeek on write-prd/grill-me/post-merge to "
+                    "spread load off Claude quota."
                 ),
             },
         },

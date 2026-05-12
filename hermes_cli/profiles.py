@@ -264,6 +264,80 @@ def normalize_profile_name(name: str) -> str:
     return stripped.lower()
 
 
+# patch-2026-05-07-A: resolve_dispatch_profile
+# Added 2026-05-07 (session 10) to wire `kanban_assignee_map` from
+# config.yaml into the dispatcher gate + _default_spawn. Without this,
+# domain-named assignees (build/projects/contracts/agent/kb/hermes,
+# the per-§3.1(d) routing convention) were silently filtered as
+# non-spawnable because no profile is literally named "build" etc.
+# Anchored: arch doc §3.1(d), §10.1 patch catalog.
+def resolve_dispatch_profile(assignee, profile_dir=None):
+    """Resolve a kanban assignee to the profile that should spawn workers.
+
+    Reads ``kanban_assignee_map`` from the active profile's ``config.yaml``.
+    If the assignee is in the map, returns the mapped profile name
+    (canonicalized). Otherwise falls back to ``normalize_profile_name``.
+
+    This lets a profile declare domain-named lanes ("build", "projects",
+    "agent", "kb", etc.) that all spawn workers under a single underlying
+    profile, while preserving the original assignee for
+    ``HERMES_KANBAN_DOMAIN`` routing (set separately at spawn time).
+
+    Args:
+        assignee: The literal assignee string from the task row.
+        profile_dir: Optional override for which profile config to read.
+            Defaults to ``$HERMES_HOME`` (or the default home path).
+
+    Returns:
+        The canonical profile name to spawn under. Returns ``assignee``
+        unchanged if it is empty/non-string (the caller's downstream
+        error handling decides what to do).
+    """
+    if not assignee or not isinstance(assignee, str):
+        return assignee
+    canon = normalize_profile_name(assignee)
+    try:
+        if profile_dir is None:
+            home = os.environ.get("HERMES_HOME")
+            if not home:
+                home = str(_get_default_hermes_home())
+            profile_dir = Path(home)
+        else:
+            profile_dir = Path(profile_dir)
+        config_path = profile_dir / "config.yaml"
+        if config_path.exists():
+            # Local import: pyyaml is a tracked §10.1 dep; the import
+            # cost only fires on the dispatcher path, not on every
+            # `hermes` invocation.
+            import yaml
+            cfg = yaml.safe_load(config_path.read_text()) or {}
+            assignee_map = cfg.get("kanban_assignee_map", {}) or {}
+            if not isinstance(assignee_map, dict):
+                return canon
+            # Try literal first (preserves casing), then canonicalized.
+            for key in (assignee, canon):
+                if key in assignee_map:
+                    mapped = assignee_map[key]
+                    if isinstance(mapped, str) and mapped.strip():
+                        return normalize_profile_name(mapped)
+    except Exception as exc:
+        # Defensive: any read/parse error falls through to the canonical
+        # name. The dispatcher's ``profile_exists`` check downstream
+        # still filters impossibles, just not via the map. Emit a stderr
+        # note so the operator has a clue when domain assignees skip as
+        # non-spawnable due to a config read failure rather than a
+        # genuine missing-profile case (Codex R1 LOW #1).
+        import sys as _sys
+        print(
+            f"resolve_dispatch_profile: kanban_assignee_map read failed "
+            f"for {assignee!r} ({exc!r}); falling through to "
+            f"canonical name",
+            file=_sys.stderr,
+        )
+    return canon
+
+
+
 def validate_profile_name(name: str) -> None:
     """Raise ``ValueError`` if *name* is not a valid profile identifier.
 

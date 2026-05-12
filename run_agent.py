@@ -15189,7 +15189,9 @@ class AIAgent:
             str: Final assistant response
         """
         result = self.run_conversation(message, stream_callback=stream_callback)
-        return result["final_response"]
+        # francese-ext: defensive .get() — provider may return result without final_response
+        # (e.g. LM Studio reasoning models with finish_reason=length and empty content)
+        return result.get("final_response") or ""
 
 
 def main(

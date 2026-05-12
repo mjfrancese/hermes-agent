@@ -733,6 +733,10 @@ class Task:
     # ``kanban.failure_limit`` config, and then to ``DEFAULT_FAILURE_LIMIT``.
     # Name matches the ``--max-retries`` CLI flag on ``kanban create``.
     max_retries: Optional[int] = None
+    # Per-task model pin. Format: "provider/model" (e.g. "openai-codex/gpt-5.5"
+    # or "anthropic/claude-sonnet-4-6"). Parsed at spawn time into --provider and
+    # --model flags. None = use the profile's default model.
+    model_override: Optional[str] = None
     # Free-form JSON dict for structured handoff facts written at
     # kanban_create time (lifecycle chain metadata transport). Decoded
     # from the JSON blob stored in the DB; None means no metadata was
@@ -801,6 +805,9 @@ class Task:
             skills=skills_value,
             max_retries=(
                 row["max_retries"] if "max_retries" in keys else None
+            ),
+            model_override=(
+                row["model_override"] if "model_override" in keys else None
             ),
             metadata=_parse_task_metadata(row["metadata"]) if "metadata" in keys else None,
         )
@@ -1376,6 +1383,7 @@ def create_task(
     skills: Optional[Iterable[str]] = None,
     max_retries: Optional[int] = None,
     metadata: Optional[dict] = None,  # patch-2026-05-11-B5: create_task metadata kwarg
+    model_override: Optional[str] = None,  # patch-2026-05-12-DS: per-task model pin ("provider/model"). do NOT remove -- DeepSeek load-balancing depends on this
 ) -> str:
     """Create a new task and optionally link it under parent tasks.
 
@@ -1509,8 +1517,8 @@ def create_task(
                         id, title, body, assignee, status, priority,
                         created_by, created_at, workspace_kind, workspace_path,
                         tenant, idempotency_key, max_runtime_seconds, skills,
-                        max_retries, metadata
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)  -- patch-2026-05-11-B6: INSERT metadata col
+                        max_retries, metadata, model_override
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)  -- patch-2026-05-12-DS: model_override col
                     """,
                     (
                         task_id,
@@ -1529,6 +1537,7 @@ def create_task(
                         json.dumps(skills_list) if skills_list is not None else None,
                         int(max_retries) if max_retries is not None else None,
                         json.dumps(metadata) if metadata is not None else None,
+                        model_override if model_override else None,
                     ),
                 )
                 for pid in parents:
@@ -1547,6 +1556,18 @@ def create_task(
                         "tenant": tenant,
                         "skills": list(skills_list) if skills_list else None,
                     },
+                )
+                # DO NOT REMOVE: auto-subscribe every new task to BB so the
+                # gateway kanban-notifier fires on blocked/crashed/etc events.
+                # Workers used to block silently; Michael had to ask every
+                # session whether there were pending questions. (2026-05-13)
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO kanban_notify_subs
+                        (task_id, platform, chat_id, thread_id, user_id, created_at)
+                    VALUES (?, 'bluebubbles', '+15169039869', '', NULL, ?)
+                    """,
+                    (task_id, now),
                 )
             return task_id
         except sqlite3.IntegrityError:
@@ -4255,6 +4276,12 @@ def _default_spawn(
 
     prompt = f"work kanban task {task.id}"
     env = dict(os.environ)
+    # Ensure ~/.local/bin is on PATH for workers spawned from non-interactive
+    # shells (cron, systemd) where .bashrc is not sourced. This is where
+    # codex and other user-installed tools live.
+    _local_bin = os.path.expanduser("~/.local/bin")
+    if _local_bin not in env.get("PATH", ""):
+        env["PATH"] = _local_bin + ":" + env.get("PATH", "")
     if task.tenant:
         env["HERMES_TENANT"] = task.tenant
     env["HERMES_KANBAN_TASK"] = task.id
@@ -4309,6 +4336,14 @@ def _default_spawn(
         for sk in task.skills:
             if sk and sk != "kanban-worker":
                 cmd.extend(["--skills", sk])
+    # Per-task model/provider override. Format: "provider/model" or just "model".
+    # Split on first "/" -- everything before is provider, everything after is model.
+    if task.model_override:
+        parts = task.model_override.split("/", 1)
+        if len(parts) == 2:
+            cmd.extend(["--provider", parts[0], "--model", parts[1]])
+        else:
+            cmd.extend(["--model", parts[0]])
     cmd.extend([
         "chat",
         "-q", prompt,
@@ -4451,7 +4486,12 @@ def build_worker_context(conn: sqlite3.Connection, task_id: str) -> str:
     lines.append(f"# Kanban task {task.id}: {task.title}")
     lines.append("")
     lines.append(f"Assignee: {task.assignee or '(unassigned)'}")
-    lines.append(f"Status:   {task.status}")
+    if (task.status == "running"
+            and task.skills
+            and "lifecycle-orchestrator" in task.skills):
+        lines.append("Status:   running [ORCHESTRATING — decomposing into phase tasks]")
+    else:
+        lines.append(f"Status:   {task.status}")
     if task.tenant:
         lines.append(f"Tenant:   {task.tenant}")
     lines.append(f"Workspace: {task.workspace_kind} @ {task.workspace_path or '(unresolved)'}")
@@ -4891,6 +4931,95 @@ def gc_events(
             (cutoff,),
         )
     return int(cur.rowcount or 0)
+
+
+# Event kinds that represent crash/spawn noise with no diagnostic value once the
+# task has recovered.  "gave_up" is included because it is always preceded by a
+# run of claimed/spawned/crashed triples that tell the same story.
+_CRASH_NOISE_KINDS = frozenset({"claimed", "spawned", "crashed", "spawn_failed", "gave_up"})
+
+# A task is considered "noisy" if it has >= this many crash-noise events AND the
+# ratio of noise events to total events exceeds the threshold.
+_CRASH_NOISE_MIN_COUNT = 50
+_CRASH_NOISE_RATIO_THRESHOLD = 0.80
+
+
+def gc_crash_noise(
+    conn: sqlite3.Connection,
+    *,
+    min_count: int = _CRASH_NOISE_MIN_COUNT,
+    ratio_threshold: float = _CRASH_NOISE_RATIO_THRESHOLD,
+    older_than_seconds: int = 3 * 24 * 3600,
+    dry_run: bool = False,
+) -> dict:
+    """Prune bulk crash/spawn-cycle events that accumulated before Hermes was
+    fully set up, leaving only meaningful diagnostic events.
+
+    Unlike ``gc_events``, this operates on ALL task statuses (including
+    ``blocked`` and ``running``) because crash-noise tasks are stuck in
+    non-terminal states by definition.  The guard conditions ensure we only
+    touch genuinely noisy tasks:
+
+    - The task has >= ``min_count`` crash-noise events, AND
+    - crash-noise events make up >= ``ratio_threshold`` of all events, AND
+    - all crash-noise events to delete are older than ``older_than_seconds``
+      (default 3 days) -- we never touch recent crash data.
+
+    Returns a dict:
+      tasks_affected  -- number of tasks pruned
+      events_removed  -- number of event rows deleted
+      dry_run         -- True if no rows were actually deleted
+    """
+    cutoff = int(time.time()) - int(older_than_seconds)
+
+    # Identify noisy task ids: lots of crash-noise events with old timestamps.
+    placeholders = ",".join("?" * len(_CRASH_NOISE_KINDS))
+    rows = conn.execute(
+        f"""
+        SELECT
+            te.task_id,
+            COUNT(*) AS total_events,
+            SUM(CASE WHEN te.kind IN ({placeholders}) AND te.created_at < ? THEN 1 ELSE 0 END) AS old_noise,
+            COUNT(*) AS all_events
+        FROM task_events te
+        GROUP BY te.task_id
+        HAVING old_noise >= ?
+        """,
+        (*_CRASH_NOISE_KINDS, cutoff, min_count),
+    ).fetchall()
+
+    tasks_affected = 0
+    events_removed = 0
+
+    for row in rows:
+        task_id = row[0]
+        total = row[1]
+        old_noise = row[2]
+        if total == 0:
+            continue
+        ratio = old_noise / total
+        if ratio < ratio_threshold:
+            continue
+        # This task qualifies for noise pruning.
+        if dry_run:
+            tasks_affected += 1
+            events_removed += old_noise
+            continue
+        with write_txn(conn):
+            cur = conn.execute(
+                f"DELETE FROM task_events WHERE task_id = ? AND kind IN ({placeholders}) AND created_at < ?",
+                (task_id, *_CRASH_NOISE_KINDS, cutoff),
+            )
+            deleted = int(cur.rowcount or 0)
+        if deleted > 0:
+            tasks_affected += 1
+            events_removed += deleted
+
+    return {
+        "tasks_affected": tasks_affected,
+        "events_removed": events_removed,
+        "dry_run": dry_run,
+    }
 
 
 def gc_worker_logs(

@@ -46,11 +46,30 @@ def _fmt_ts(ts: Optional[int]) -> str:
     return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
 
 
+def _is_orchestrating(t: kb.Task) -> bool:
+    """Return True when a running task is executing the lifecycle-orchestrator skill.
+
+    These tasks are decomposing a ticket into phase tasks, not doing direct work.
+    Distinguishing them prevents them from appearing as active feature workers
+    during a status check.
+    """
+    return (
+        t.status == "running"
+        and bool(t.skills)
+        and "lifecycle-orchestrator" in t.skills
+    )
+
+
 def _fmt_task_line(t: kb.Task) -> str:
-    icon = _STATUS_ICONS.get(t.status, "?")
+    if _is_orchestrating(t):
+        icon = "⚙"
+        status_str = "orchestrng"
+    else:
+        icon = _STATUS_ICONS.get(t.status, "?")
+        status_str = t.status
     assignee = t.assignee or "(unassigned)"
     tenant = f" [{t.tenant}]" if t.tenant else ""
-    return f"{icon} {t.id}  {t.status:8s}  {assignee:20s}{tenant}  {t.title}"
+    return f"{icon} {t.id}  {status_str:10s}  {assignee:20s}{tenant}  {t.title}"
 
 
 def _task_to_dict(t: kb.Task) -> dict[str, Any]:
@@ -71,6 +90,9 @@ def _task_to_dict(t: kb.Task) -> dict[str, Any]:
         "result": t.result,
         "skills": list(t.skills) if t.skills else [],
         "max_retries": t.max_retries,
+        # F-20: True when a running task is decomposing (orchestrating) rather
+        # than doing direct work. Computed from skills, not a stored column.
+        "is_orchestrating": _is_orchestrating(t),
     }
 
 
@@ -294,6 +316,13 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
                                "two retries. Omit to use the dispatcher's "
                                "kanban.failure_limit config "
                                f"(default {kb.DEFAULT_FAILURE_LIMIT}).")
+    # patch-2026-05-12-DS: DeepSeek per-task model pin. do NOT remove -- load-balancing depends on this.
+    p_create.add_argument("--model-override", default=None, dest="model_override",
+                          metavar="PROVIDER/MODEL",
+                          help="Per-task model/provider override, e.g. "
+                               "'deepseek/deepseek-chat'. Dispatcher passes "
+                               "--provider and --model to the worker, "
+                               "overriding the profile default.")
     p_create.add_argument("--json", action="store_true", help="Emit JSON output")
 
     # --- list ---
@@ -614,6 +643,18 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
                       help="Delete task_events older than N days for terminal tasks (default: 30)")
     p_gc.add_argument("--log-retention-days", type=int, default=30,
                       help="Delete worker log files older than N days (default: 30)")
+    p_gc.add_argument("--prune-crash-noise", action="store_true",
+                      help=(
+                          "Prune bulk crash/spawn-cycle events from tasks that accumulated "
+                          "pre-setup noise (>= 80%% noise ratio, >= 50 events, older than 3 days). "
+                          "Applies to all task statuses, including blocked and running."
+                      ))
+    p_gc.add_argument("--crash-noise-min-count", type=int, default=50,
+                      help="Min crash-noise event count before pruning triggers (default: 50)")
+    p_gc.add_argument("--crash-noise-older-than-days", type=int, default=3,
+                      help="Only prune crash-noise events older than N days (default: 3)")
+    p_gc.add_argument("--dry-run", action="store_true",
+                      help="Print what would be removed without deleting anything")
 
     kanban_parser.set_defaults(_kanban_parser=kanban_parser)
     return kanban_parser
@@ -1054,6 +1095,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
             max_runtime_seconds=max_runtime,
             skills=getattr(args, "skills", None) or None,
             max_retries=max_retries,
+            model_override=getattr(args, "model_override", None),  # patch-2026-05-12-DS: DeepSeek per-task routing. do NOT remove.
         )
         task = kb.get_task(conn, task_id)
     if getattr(args, "json", False):
@@ -1174,6 +1216,8 @@ def _cmd_show(args: argparse.Namespace) -> int:
 
     print(f"Task {task.id}: {task.title}")
     print(f"  status:    {task.status}")
+    if _is_orchestrating(task):
+        print(f"             [ORCHESTRATING — decomposing into phase tasks, not doing direct work]")
     print(f"  assignee:  {task.assignee or '-'}")
     if task.tenant:
         print(f"  tenant:    {task.tenant}")
@@ -2120,6 +2164,7 @@ def _cmd_gc(args: argparse.Namespace) -> int:
 
     event_days = getattr(args, "event_retention_days", 30)
     log_days = getattr(args, "log_retention_days", 30)
+    dry_run = getattr(args, "dry_run", False)
     with kb.connect() as conn:
         removed_events = kb.gc_events(
             conn, older_than_seconds=event_days * 24 * 3600,
@@ -2127,6 +2172,31 @@ def _cmd_gc(args: argparse.Namespace) -> int:
     removed_logs = kb.gc_worker_logs(
         older_than_seconds=log_days * 24 * 3600,
     )
+
+    noise_tasks = 0
+    noise_events = 0
+    if getattr(args, "prune_crash_noise", False):
+        min_count = getattr(args, "crash_noise_min_count", 50)
+        older_days = getattr(args, "crash_noise_older_than_days", 3)
+        with kb.connect() as conn:
+            result = kb.gc_crash_noise(
+                conn,
+                min_count=min_count,
+                older_than_seconds=older_days * 24 * 3600,
+                dry_run=dry_run,
+            )
+        noise_tasks = result["tasks_affected"]
+        noise_events = result["events_removed"]
+        if dry_run:
+            print(
+                f"[dry-run] crash-noise pruning would affect {noise_tasks} task(s), "
+                f"{noise_events} event row(s)"
+            )
+        else:
+            print(
+                f"crash-noise pruning: {noise_tasks} task(s), {noise_events} event row(s) removed"
+            )
+
     print(f"GC complete: {removed_ws} workspace(s), "
           f"{removed_events} event row(s), {removed_logs} log file(s) removed")
     return 0
