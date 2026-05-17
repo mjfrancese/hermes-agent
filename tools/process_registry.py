@@ -583,10 +583,18 @@ class ProcessRegistry:
             # descendants spawned via setsid) before re-raising so they do not
             # leak as untracked background processes.
             try:
+                # Use getattr for os.killpg and signal.SIGKILL — neither
+                # exists on Windows, and static analysers flag the bare
+                # attribute access even inside a runtime _IS_WINDOWS guard.
+                _sigkill = getattr(signal, 'SIGKILL', signal.SIGTERM)
                 if not _IS_WINDOWS:
-                    try:
-                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                    except (ProcessLookupError, PermissionError, OSError):
+                    _killpg = getattr(os, 'killpg', None)
+                    if _killpg is not None:
+                        try:
+                            _killpg(os.getpgid(proc.pid), _sigkill)
+                        except (ProcessLookupError, PermissionError, OSError, AttributeError):
+                            proc.kill()
+                    else:
                         proc.kill()
                 else:
                     proc.kill()

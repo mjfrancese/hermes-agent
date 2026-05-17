@@ -226,6 +226,13 @@ def make_runner(platform: Platform, session_entry: SessionEntry = None) -> "Gate
     runner.pairing_store._is_rate_limited = MagicMock(return_value=False)
     runner.pairing_store.generate_code = MagicMock(return_value="ABC123")
 
+    # Disable destructive slash confirmation so /new and /reset execute
+    # immediately in e2e tests. Without this, _maybe_confirm_destructive_slash
+    # shows a confirmation prompt and the action never runs.
+    runner._read_user_config = MagicMock(
+        return_value={"approvals": {"destructive_slash_confirm": False}}
+    )
+
     return runner
 
 
