@@ -941,7 +941,12 @@ CREATE TABLE IF NOT EXISTS tasks (
     -- orchestrators via kanban_create (lifecycle chain metadata transport)
     -- and surfaced to downstream workers via build_worker_context.
     -- NULL or empty dict means no metadata was provided.
-    metadata             TEXT
+    metadata             TEXT,
+    -- Per-task LLM model override. When set, the dispatcher passes this
+    -- to the spawned worker as the resolved model. NULL = use the default
+    -- model for the assigned profile. Stored as "provider/model" string
+    -- (e.g. "openai-codex/gpt-5.5" or "anthropic/claude-sonnet-4-6").
+    model_override       TEXT
 );
 
 CREATE TABLE IF NOT EXISTS task_links (
@@ -1225,6 +1230,14 @@ def _migrate_add_optional_columns(conn: sqlite3.Connection) -> None:
         # and callers of kanban_create. Added in patch-2026-05-11-B5.
         # NULL is safe for existing rows (no metadata = empty handoff).
         _add_column_if_missing(conn, "tasks", "metadata", "metadata TEXT")
+
+    if "model_override" not in cols:
+        # Per-task LLM model override. When set, the dispatcher passes this
+        # to the spawned worker as the resolved model. Existing rows get
+        # NULL (default model selection behaviour is unchanged).
+        _add_column_if_missing(
+            conn, "tasks", "model_override", "model_override TEXT"
+        )
 
     # task_events gained a run_id column; back-fill it as NULL for
     # historical events (they predate runs and can't be attributed).
