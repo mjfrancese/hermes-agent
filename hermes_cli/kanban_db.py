@@ -747,6 +747,24 @@ def _parse_task_metadata(raw):
     return None
 
 
+def _parse_task_metadata(raw):
+    """Parse a task's JSON-encoded metadata blob.
+
+    patch-2026-05-07-B4: _parse_task_metadata helper (session 10). Returns the decoded dict on
+    success. Returns None for NULL/empty input or any decode failure
+    (defensive: don't propagate bad legacy data through from_row).
+    """
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return None
+    if isinstance(parsed, dict):
+        return parsed
+    return None
+
+
 @dataclass
 class Task:
     """In-memory view of a row from the ``tasks`` table."""
@@ -6860,6 +6878,13 @@ def _default_spawn(
 
     prompt = f"work kanban task {task.id}"
     env = dict(os.environ)
+
+    # patch-2026-05-11-H: ensure ~/.local/bin on PATH for kanban workers
+    # spawned from non-interactive shells (cron/systemd) where .bashrc is
+    # not sourced. codex and other user-installed tools live here.
+    _local_bin = __import__("os").path.expanduser("~/.local/bin")
+    if _local_bin not in env.get("PATH", ""):
+        env["PATH"] = _local_bin + ":" + env.get("PATH", "")
 
     # Inject HERMES_HOME so the worker reads the profile-scoped config.yaml
     # (fallback_providers, toolsets, agent settings, etc.) instead of the root
