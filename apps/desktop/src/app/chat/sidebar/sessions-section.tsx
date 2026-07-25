@@ -205,16 +205,7 @@ export function SidebarSessionsSection({
   // The flat recents/pinned list is the only place sessions reorder by hand;
   // grouped/tree views always sort by creation date and never drag.
   const sessionsDraggable = sortable && !!onReorderSessions
-  // Pinned and manual-drag lists pass sessions already in the caller's order.
-  // Default recents stay dateGrouped and still re-sort roots by group recency
-  // so partition buckets stay truthful — but NEVER for pins, where a turn
-  // finishing was floating background tasks over the user's fixed ranking.
-  const preserveInputOrder = pinned || (sessionsDraggable && !dateGrouped)
-
-  const displayEntries = useMemo(
-    () => flattenSessionsWithBranches(sessions, { preserveOrder: preserveInputOrder }),
-    [sessions, preserveInputOrder]
-  )
+  const displayEntries = useMemo(() => flattenSessionsWithBranches(sessions), [sessions])
 
   const renderRow = (session: SessionInfo, draggable: boolean, branchStem?: string) => {
     const rowProps = {

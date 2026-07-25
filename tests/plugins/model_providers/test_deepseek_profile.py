@@ -1,10 +1,10 @@
 """Unit tests for the DeepSeek provider profile's thinking-mode wiring.
 
-DeepSeek V4 expects every request to carry an explicit ``extra_body.thinking``
-parameter.  Omitting it makes the server default to thinking-mode ON, which
-then enforces the ``reasoning_content``-must-be-echoed-back contract on
-subsequent turns and breaks the conversation with HTTP 400 (#15700, #17212,
-#17825).
+DeepSeek V4 (and the legacy ``deepseek-reasoner``) expects every request to
+carry an explicit ``extra_body.thinking`` parameter.  Omitting it makes the
+server default to thinking-mode ON, which then enforces the
+``reasoning_content``-must-be-echoed-back contract on subsequent turns and
+breaks the conversation with HTTP 400 (#15700, #17212, #17825).
 
 These tests pin the profile's wire-shape contract so DeepSeek requests stay
 correctly shaped without going live.
@@ -106,7 +106,7 @@ class TestDeepSeekThinkingWireShape:
 
 
 class TestDeepSeekModelGating:
-    """V4 family gets thinking; V3 / unknown stay untouched."""
+    """V4 family + ``deepseek-reasoner`` get thinking; V3 stays untouched."""
 
     @pytest.mark.parametrize(
         "model",
@@ -114,6 +114,7 @@ class TestDeepSeekModelGating:
             "deepseek-v4-pro",
             "deepseek-v4-flash",
             "deepseek-v4-future-variant",
+            "deepseek-reasoner",
             "DEEPSEEK-V4-PRO",  # case-insensitive
         ],
     )
@@ -126,6 +127,7 @@ class TestDeepSeekModelGating:
     @pytest.mark.parametrize(
         "model",
         [
+            "deepseek-chat",         # V3 alias
             "deepseek-v3-0324",      # explicit V3
             "deepseek-v3.1",         # V3 minor revisions
             "",                       # bare/unknown
@@ -166,11 +168,11 @@ class TestDeepSeekFullKwargsIntegration:
         assert kwargs["reasoning_effort"] == "high"
         assert kwargs["extra_body"] == {"thinking": {"type": "enabled"}}
 
-    def test_v3_full_kwargs_omit_thinking(self, deepseek_profile):
+    def test_v3_chat_full_kwargs_omit_thinking(self, deepseek_profile):
         from agent.transports.chat_completions import ChatCompletionsTransport
 
         kwargs = ChatCompletionsTransport().build_kwargs(
-            model="deepseek-v3-0324",
+            model="deepseek-chat",
             messages=[{"role": "user", "content": "ping"}],
             tools=None,
             provider_profile=deepseek_profile,
@@ -193,18 +195,12 @@ class TestDeepSeekAuxModel:
     system.
     """
 
-    def test_profile_advertises_deepseek_v4_flash(self, deepseek_profile):
-        assert deepseek_profile.default_aux_model == "deepseek-v4-flash"
+    def test_profile_advertises_deepseek_chat(self, deepseek_profile):
+        assert deepseek_profile.default_aux_model == "deepseek-chat"
 
-    def test_fallback_models_are_v4_only(self, deepseek_profile):
-        assert deepseek_profile.fallback_models == (
-            "deepseek-v4-pro",
-            "deepseek-v4-flash",
-        )
-
-    def test_consumer_api_returns_deepseek_v4_flash(self):
+    def test_consumer_api_returns_deepseek_chat(self):
         from agent.auxiliary_client import _get_aux_model_for_provider
-        assert _get_aux_model_for_provider("deepseek") == "deepseek-v4-flash"
+        assert _get_aux_model_for_provider("deepseek") == "deepseek-chat"
 
     def test_consumer_api_returns_non_empty(self):
         from agent.auxiliary_client import _get_aux_model_for_provider

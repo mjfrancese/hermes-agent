@@ -21,7 +21,6 @@ import {
 import { clearNotifications, notify, notifyError } from '@/store/notifications'
 import { requestDesktopOnboarding } from '@/store/onboarding'
 import { $sessions, resolveComposerSessionKey, setAwaitingResponse, setBusy, setMessages } from '@/store/session'
-import { $sessionStates } from '@/store/session-states'
 
 import type { ClientSessionState } from '../../../types'
 import { sessionContextDrift } from '../session-context-drift'
@@ -35,7 +34,6 @@ import {
   isProviderSetupError,
   isSessionBusyError,
   isSessionNotFoundError,
-  isTargetSessionBusy,
   type SubmitTextOptions,
   withSessionBusyRetry
 } from './utils'
@@ -145,19 +143,9 @@ export function useSubmitPrompt(deps: SubmitPromptDeps) {
       // from $busy by a separate effect) may still read true — honoring it would
       // bounce the drained send. The drain lock serializes them; the user path
       // keeps the guard so a stray Enter mid-turn can't double-submit.
-      //
-      // The guard reads the TARGET session's busy state (isTargetSessionBusy),
-      // not the foreground flag: an explicit target (tile, queue drain) is
-      // frequently not the session on screen, so the foreground flag would gate
-      // one session's send on another session's turn.
       const hasSendable = Boolean(visibleText || terminalContextBlocks || attachments.length || hasImage)
 
-      const guardSessionId = options?.sessionId ?? activeSessionIdRef.current
-
-      if (
-        !hasSendable ||
-        (!options?.fromQueue && isTargetSessionBusy($sessionStates.get(), guardSessionId, busyRef.current))
-      ) {
+      if (!hasSendable || (!options?.fromQueue && busyRef.current)) {
         return false
       }
 

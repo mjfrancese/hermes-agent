@@ -404,7 +404,6 @@ export function GatewaySettings({ embedded = false }: { embedded?: boolean } = {
     return () => void (cancelled = true)
   }, [state.mode])
 
-  // eslint-disable-next-line no-restricted-syntax -- monotonic request-sequence counters, not an atom mirror
   useEffect(() => {
     contextSeq.current += 1
     sshTestSeq.current += 1
@@ -1054,11 +1053,11 @@ export function GatewaySettings({ embedded = false }: { embedded?: boolean } = {
         <div className="grid auto-rows-fr grid-cols-1 gap-2 sm:grid-cols-2 min-[72rem]:grid-cols-4">
           <ModeCard
             active={state.mode === 'local'}
-            description={scope === null ? g.localDesc : g.inheritDesc}
+            description={g.localDesc}
             disabled={state.envOverride}
             icon={Monitor}
             onSelect={() => setState(current => ({ ...current, mode: 'local' }))}
-            title={scope === null ? g.localTitle : g.inheritTitle}
+            title={g.localTitle}
           />
           <ModeCard
             active={state.mode === 'cloud'}

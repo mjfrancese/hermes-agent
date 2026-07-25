@@ -66,9 +66,7 @@ def test_busy_interrupt_mode_redirects_active_turn(monkeypatch):
 
     assert resp["result"]["status"] == "redirected"
     assert seen == ["redirect"]
-    # Appended, not overwritten: the original prompt must stay recoverable.
-    assert session["inflight_turn"]["user"] == "original request"
-    assert session["inflight_turn"]["corrections"] == ["redirect"]
+    assert session["inflight_turn"]["user"] == "redirect"
     assert session.get("queued_prompt") is None
 
 

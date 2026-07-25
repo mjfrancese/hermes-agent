@@ -4,7 +4,6 @@ import { useEffect, useRef } from 'react'
 
 import { DASHBOARD_TUI_MODE } from '../config/env.js'
 import { TYPING_IDLE_MS } from '../config/timing.js'
-import { applyCompletion } from '../domain/slash.js'
 import type {
   ApprovalRespondResponse,
   ConfigSetResponse,
@@ -641,7 +640,12 @@ export function useInputHandlers(ctx: InputHandlerContext): InputHandlerResult {
       const row = cState.completions[cState.compIdx]
 
       if (row?.text) {
-        cActions.setInput(applyCompletion(cState.input, row.text, cState.compReplace))
+        const text =
+          cState.input.startsWith('/') && row.text.startsWith('/') && cState.compReplace > 0
+            ? row.text.slice(1)
+            : row.text
+
+        cActions.setInput(cState.input.slice(0, cState.compReplace) + text)
       }
 
       return

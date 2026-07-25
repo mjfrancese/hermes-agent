@@ -232,32 +232,18 @@ class TestDeepseekVSeriesPassThrough:
         assert result == "deepseek-v4-flash"
 
 
-# ── DeepSeek post-2026-07-24 alias remapping ───────────────────────────
+# ── DeepSeek regressions (existing behaviour still holds) ──────────────
 
 class TestDeepseekCanonicalAndReasonerMapping:
-    """Retired aliases and fuzzy names rewrite to deepseek-v4-flash.
-
-    DeepSeek cut off ``deepseek-chat`` / ``deepseek-reasoner`` on
-    2026-07-24; sending them on the wire returns HTTP 400.
-    """
+    """Canonical pass-through and reasoner-keyword folding stay intact."""
 
     @pytest.mark.parametrize("model,expected", [
-        ("deepseek-chat", "deepseek-v4-flash"),
-        ("deepseek-reasoner", "deepseek-v4-flash"),
-        ("DEEPSEEK-CHAT", "deepseek-v4-flash"),
-        ("DEEPSEEK-REASONER", "deepseek-v4-flash"),
-        ("deepseek/deepseek-reasoner", "deepseek-v4-flash"),
-        ("deepseek-v4-pro", "deepseek-v4-pro"),
-        ("deepseek-v4-flash", "deepseek-v4-flash"),
+        ("deepseek-chat", "deepseek-chat"),
+        ("deepseek-reasoner", "deepseek-reasoner"),
+        ("DEEPSEEK-CHAT", "deepseek-chat"),
     ])
-    def test_retired_aliases_and_canonicals(self, model, expected):
+    def test_canonical_models_pass_through(self, model, expected):
         assert _normalize_for_deepseek(model) == expected
-
-    def test_provider_path_rewrites_reasoner(self):
-        assert (
-            normalize_model_for_provider("deepseek-reasoner", "deepseek")
-            == "deepseek-v4-flash"
-        )
 
     @pytest.mark.parametrize("model", [
         "deepseek-r1",
@@ -266,8 +252,8 @@ class TestDeepseekCanonicalAndReasonerMapping:
         "deepseek-reasoning-preview",
         "deepseek-cot-experimental",
     ])
-    def test_reasoner_keywords_map_to_v4_flash(self, model):
-        assert _normalize_for_deepseek(model) == "deepseek-v4-flash"
+    def test_reasoner_keywords_map_to_reasoner(self, model):
+        assert _normalize_for_deepseek(model) == "deepseek-reasoner"
 
     @pytest.mark.parametrize("model", [
         "deepseek-chat-v3.1",    # 'chat' prefix, not V-series pattern
@@ -275,5 +261,5 @@ class TestDeepseekCanonicalAndReasonerMapping:
         "something-random",
         "gpt-5",                 # non-DeepSeek names still fall through
     ])
-    def test_unknown_names_fall_back_to_v4_flash(self, model):
-        assert _normalize_for_deepseek(model) == "deepseek-v4-flash"
+    def test_unknown_names_fall_back_to_chat(self, model):
+        assert _normalize_for_deepseek(model) == "deepseek-chat"

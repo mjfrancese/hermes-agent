@@ -14,19 +14,9 @@ def test_prompt_model_selection_uses_curses_radiolist():
 
     seen = {}
 
-    def _fake(
-        title,
-        items,
-        *,
-        selected=0,
-        cancel_returns=None,
-        description=None,
-        searchable=False,
-        search_labels=None,
-    ):
+    def _fake(title, items, *, selected=0, cancel_returns=None, description=None, searchable=False):
         seen["title"] = title
         seen["items"] = items
-        seen["search_labels"] = search_labels
         return 1  # pick second model
 
     with patch("hermes_cli.curses_ui.curses_radiolist", side_effect=_fake), \
@@ -40,8 +30,6 @@ def test_prompt_model_selection_uses_curses_radiolist():
     plain = [radio_item_plain(item) for item in seen["items"]]
     assert plain[:2] == ["model-a", "model-b"]
     assert "Skip (keep current)" in plain
-    assert seen["search_labels"] is not None
-    assert len(seen["search_labels"]) == len(seen["items"])
 
 
 def test_prompt_model_selection_esc_cancels():
@@ -82,18 +70,8 @@ def test_model_selection_with_pricing_passes_description():
 
     seen = {}
 
-    def _fake(
-        title,
-        items,
-        *,
-        selected=0,
-        cancel_returns=None,
-        description=None,
-        searchable=False,
-        search_labels=None,
-    ):
+    def _fake(title, items, *, selected=0, cancel_returns=None, description=None, searchable=False):
         seen["description"] = description
-        seen["search_labels"] = search_labels
         return len(items) - 1  # Skip
 
     pricing = {

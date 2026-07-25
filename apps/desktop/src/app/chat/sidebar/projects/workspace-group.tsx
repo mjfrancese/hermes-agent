@@ -9,7 +9,7 @@ import { notifyError } from '@/store/notifications'
 import { newSessionInProfile } from '@/store/profile'
 import { switchBranchInRepo } from '@/store/projects'
 
-import { SidebarRowStack } from '../chrome'
+import { countLabel, SidebarRowStack } from '../chrome'
 import { SidebarLoadMoreRow } from '../load-more-row'
 
 import { SIDEBAR_GROUP_PAGE, useWorkspaceNodeOpen } from './model'
@@ -37,13 +37,11 @@ export function SidebarWorkspaceGroup({ group, renderRows, onNewSession, onRemov
   const [visibleCount, setVisibleCount] = useState(SIDEBAR_GROUP_PAGE)
 
   const loadedCount = group.sessions.length
+  // Profile groups know their on-disk total (children excluded); workspace
+  // groups only ever page within what's already loaded.
+  const totalCount = isProfileGroup ? Math.max(group.totalCount ?? loadedCount, loadedCount) : loadedCount
   const visibleSessions = group.sessions.slice(0, visibleCount)
-  // Profile groups can have more rows on the server than are loaded — the
-  // aggregator reports `hasMore` so the lane can offer another page without
-  // pricing an exact total per refresh. Workspace groups only ever page within
-  // what's already loaded.
-  const hiddenLoaded = Math.max(0, loadedCount - visibleSessions.length)
-  const hiddenCount = isProfileGroup && group.hasMore ? Math.max(hiddenLoaded, 1) : hiddenLoaded
+  const hiddenCount = Math.max(0, totalCount - visibleSessions.length)
   const nextCount = Math.min(SIDEBAR_GROUP_PAGE, hiddenCount)
 
   // Leading glyph: profile color dot, a home mark for the repo's primary
@@ -65,7 +63,7 @@ export function SidebarWorkspaceGroup({ group, renderRows, onNewSession, onRemov
 
     setVisibleCount(target)
 
-    if (target > loadedCount && group.hasMore) {
+    if (target > loadedCount && loadedCount < totalCount) {
       group.onLoadMore?.()
     }
   }
@@ -121,7 +119,7 @@ export function SidebarWorkspaceGroup({ group, renderRows, onNewSession, onRemov
             </div>
           )
         }
-        count={visibleSessions.length}
+        count={isProfileGroup ? countLabel(visibleSessions.length, totalCount) : group.sessions.length}
         icon={leadingIcon}
         label={group.label}
         onToggle={toggleOpen}

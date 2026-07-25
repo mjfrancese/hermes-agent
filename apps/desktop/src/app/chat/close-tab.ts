@@ -1,7 +1,6 @@
 import { closeActiveTerminal } from '@/app/right-sidebar/terminal/terminals'
 import { closeWorkspaceTab } from '@/components/pane-shell/tree/store'
 import { isFocusWithin } from '@/lib/keybinds/combo'
-import { $artifactTabs } from '@/store/artifacts'
 import { $filePreviewTabs, $previewTarget, closeActiveRightRailTab } from '@/store/preview'
 import { closeSessionTile, nextSessionTileForWorkspace } from '@/store/session-states'
 
@@ -33,7 +32,7 @@ export function closeActiveTab(loadSessionIntoWorkspace?: (storedSessionId: stri
   // file tabs remain (the rail UI falls back to tabs[0]). Gating only on
   // `$filePreviewTarget` made ⌘W fall through to closeWorkspaceTab() and look
   // broken with a file tab still on screen.
-  if ($previewTarget.get() || $filePreviewTabs.get().length > 0 || $artifactTabs.get().length > 0) {
+  if ($previewTarget.get() || $filePreviewTabs.get().length > 0) {
     return closeActiveRightRailTab()
   }
 

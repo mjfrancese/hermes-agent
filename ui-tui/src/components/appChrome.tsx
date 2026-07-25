@@ -434,7 +434,6 @@ export function GoodVibesHeart({ tick, t }: { tick: number; t: Theme }) {
 
 export function StatusRule({
   battery,
-  focusView,
   cwdLabel,
   cols,
   busy,
@@ -571,11 +570,6 @@ export function StatusRule({
   // so it consumes tail budget LAST and drops first on a narrow terminal.
   const showDevCredits = !!devCreditsText && fits(SEP + stringWidth(devCreditsText))
 
-  // Focus-view badge. Pinned (not tail-budgeted) on purpose: the whole point of
-  // the indicator is that the user can never be in reduced-output mode without
-  // seeing it, so it must not drop off a narrow terminal.
-  const showFocus = !!focusView
-
   const handleSessionCountClick = (event: { stopImmediatePropagation?: () => void }) => {
     event.stopImmediatePropagation?.()
     onSessionCountClick?.()
@@ -640,12 +634,6 @@ export function StatusRule({
             </Text>
           ) : null}
         </Box>
-        {showFocus ? (
-          <Box flexDirection="row" flexShrink={0}>
-            <Text color={t.color.muted}>{' │ '}</Text>
-            <Text color={t.color.warn}>◉ focus</Text>
-          </Box>
-        ) : null}
         {showBar ? (
           <Text color={t.color.muted} wrap="truncate-end">
             {' │ '}
@@ -823,8 +811,6 @@ export function TranscriptScrollbar({ scrollRef, t }: TranscriptScrollbarProps) 
 
 interface StatusRuleProps {
   battery?: BatteryInfo | null
-  // Focus view (/focus) badge — display-only reduced-output indicator.
-  focusView?: boolean
   bgCount: number
   lastTurnEndedAt?: null | number
   liveSessionCount: number

@@ -23,9 +23,10 @@ import {
   setMessagingPlatformTotals,
   setMessagingSessions,
   setMessagingTruncated,
-  setSessionProfilesTruncated,
+  setSessionProfileTotals,
   setSessions,
-  setSessionsLoading
+  setSessionsLoading,
+  setSessionsTotal
 } from '@/store/session'
 import { $workingSessionIds, getRecentlySettledSessionIds } from '@/store/session-states'
 
@@ -201,13 +202,9 @@ export function useSessionListActions({ profileScope }: UseSessionListActionsArg
 
           return sameCronSignature(prev, next) ? prev : next
         })
-        // "Is there another page?" instead of an exact total: the backend
-        // reports which profiles filled their window, which costs nothing on
-        // top of the rows it already read (the old exact totals ran a COUNT(*)
-        // per profile DB on every refresh). Reference-stable when unchanged so
-        // the sidebar's group memos don't recompute per refresh.
-        setSessionProfilesTruncated(prev => {
-          const next = recents.profiles_truncated ?? {}
+        setSessionsTotal(typeof recents.total === 'number' ? recents.total : recents.sessions.length)
+        setSessionProfileTotals(prev => {
+          const next = recents.profile_totals ?? {}
           const prevKeys = Object.keys(prev)
 
           return prevKeys.length === Object.keys(next).length && prevKeys.every(key => prev[key] === next[key])
@@ -261,9 +258,8 @@ export function useSessionListActions({ profileScope }: UseSessionListActionsArg
       ...mergeSessionPage(prev.filter(inKey), result.sessions, keep)
     ])
 
-    // A full window back means the profile still has more on disk.
-    const truncated = result.sessions.length >= loaded + SIDEBAR_SESSIONS_PAGE_SIZE
-    setSessionProfilesTruncated(prev => ({ ...prev, [key]: truncated }))
+    const total = result.profile_totals?.[key] ?? result.total ?? result.sessions.length
+    setSessionProfileTotals(prev => ({ ...prev, [key]: Math.max(total, result.sessions.length) }))
   }, [])
 
   return {

@@ -283,9 +283,7 @@ def _safe_copy_db(src: Path, dst: Path) -> bool:
                     pass
 
 
-def is_zeroed_sqlite_file(
-    path: Path, *, probe_bytes: int = 100, force: bool = False
-) -> bool:
+def is_zeroed_sqlite_file(path: Path, *, probe_bytes: int = 100) -> bool:
     """True when *path* looks like the #68474 zeroed-state.db signature.
 
     Signature: size > 0, first *probe_bytes* are all NUL (no ``SQLite format 3``
@@ -298,11 +296,11 @@ def is_zeroed_sqlite_file(
         return False
     if size <= 0:
         return False
-    from hermes_cli.sqlite_safe_read import read_header_bytes_preopen
-
-    head = read_header_bytes_preopen(
-        path, length=max(16, probe_bytes), force=force
-    )
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(max(16, probe_bytes))
+    except OSError:
+        return False
     if not head:
         return False
     if head.startswith(b"SQLite format 3"):
@@ -382,22 +380,18 @@ def verify_sqlite_integrity(
     oversized = max_bytes > 0 and st.st_size > max_bytes
 
     if check_header:
-        # Byte-level read: refused when a live connection exists, because
-        # close() would cancel this process's POSIX locks on the file (see
-        # hermes_cli.sqlite_safe_read). Verification targets snapshots and
-        # backup artifacts, which are offline by construction.
-        from hermes_cli.sqlite_safe_read import read_header_bytes_preopen
-
-        head = read_header_bytes_preopen(path, length=len(_SQLITE_HEADER))
-        if head is None:
+        try:
+            with open(path, "rb") as f:
+                head = f.read(len(_SQLITE_HEADER))
+            if head != _SQLITE_HEADER:
+                result["valid"] = False
+                result["message"] = (
+                    f"missing SQLite header magic (got {head[:16].hex()!r})"
+                )
+                return result
+        except OSError as exc:
             result["valid"] = False
-            result["message"] = "cannot read header"
-            return result
-        if head != _SQLITE_HEADER:
-            result["valid"] = False
-            result["message"] = (
-                f"missing SQLite header magic (got {head[:16].hex()!r})"
-            )
+            result["message"] = f"cannot read header: {exc}"
             return result
 
     if oversized:

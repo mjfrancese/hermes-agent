@@ -89,9 +89,10 @@ import {
   $messagingPlatformTotals,
   $messagingSessions,
   $messagingTruncated,
-  $sessionProfilesTruncated,
+  $sessionProfileTotals,
   $sessions,
   $sessionsLoading,
+  $sessionsTotal,
   sessionPinId,
   setCurrentCwd
 } from '@/store/session'
@@ -107,13 +108,13 @@ import {
 } from '../../routes'
 import type { SidebarNavItem } from '../../types'
 
+import { countLabel } from './chrome'
 import { SidebarCronJobsSection } from './cron-jobs-section'
 import { SidebarLoadMoreRow } from './load-more-row'
 import { orderByIds, reconcileOrderIds, resolveManualSessionOrderIds, sameIds } from './order'
 import { ProfileRail } from './profile-switcher'
 import { ProjectDialog } from './project-dialog'
 import {
-  orderProjectsByIds,
   overlayLiveLanes,
   overlayLivePreviews,
   PROJECT_PREVIEW_COUNT,
@@ -298,7 +299,8 @@ export function ChatSidebar({
   const messagingPlatformTotals = useStore($messagingPlatformTotals)
   const messagingTruncated = useStore($messagingTruncated)
   const sessionsLoading = useStore($sessionsLoading)
-  const sessionProfilesTruncated = useStore($sessionProfilesTruncated)
+  const sessionsTotal = useStore($sessionsTotal)
+  const sessionProfileTotals = useStore($sessionProfileTotals)
   const workingSessionIds = useStore($workingSessionIds)
   const profiles = useStore($profiles)
   const profileScope = useStore($profileScope)
@@ -620,9 +622,8 @@ export function ChatSidebar({
     )
 
     // Layer the user's manual drag-order on top of the deterministic sort. Empty
-    // (default) returns `sorted` untouched; projects the user hasn't ordered yet
-    // keep their sorted position rather than jumping the hand-picked list.
-    return orderProjectsByIds(sorted, projectOrderIds)
+    // (default) returns `sorted` untouched; new projects surface on top.
+    return orderByIds(sorted, project => project.id, projectOrderIds)
   }, [showAllProfiles, projectTree, dismissedAutoProjects, orderRepos, activeProjectId, projectOrderIds])
 
   // The overview only renders in grouped mode; the model stays live regardless
@@ -717,7 +718,6 @@ export function ChatSidebar({
   // only the cheap per-repo `git worktree list`, never the heavy tree scan.
   const prevWorkingIdsRef = useRef<readonly string[]>(workingSessionIds)
 
-  // eslint-disable-next-line no-restricted-syntax -- legitimate non-atom ref write (see eslint rule comment)
   useEffect(() => {
     const prev = prevWorkingIdsRef.current
     prevWorkingIdsRef.current = workingSessionIds
@@ -754,7 +754,6 @@ export function ChatSidebar({
     [currentCwd]
   )
 
-  // eslint-disable-next-line no-restricted-syntax -- legitimate non-atom ref write (see eslint rule comment)
   useEffect(() => {
     if (!inProject || !enteredProject) {
       lastProjectCwdSyncRef.current = null
@@ -934,7 +933,7 @@ export function ChatSidebar({
           ...group,
           loadingMore: Boolean(profileLoadMorePending[group.id]),
           onLoadMore: onLoadMoreProfileSessions ? () => loadMoreForProfileGroup(group.id) : undefined,
-          hasMore: Boolean(sessionProfilesTruncated[group.id])
+          totalCount: Math.max(group.sessions.length, sessionProfileTotals[group.id] ?? 0)
         }))
         // default (root) first, then the rest alphabetically.
         .sort((a, b) => (a.id === 'default' ? -1 : b.id === 'default' ? 1 : a.label.localeCompare(b.label)))
@@ -945,7 +944,7 @@ export function ChatSidebar({
     loadMoreForProfileGroup,
     onLoadMoreProfileSessions,
     profileLoadMorePending,
-    sessionProfilesTruncated
+    sessionProfileTotals
   ])
 
   // The flat Sessions list always shows ALL recent sessions; Projects is a
@@ -953,16 +952,22 @@ export function ChatSidebar({
   const displayAgentSessions = agentSessions
 
   // Pagination is scope-aware. In "All profiles" mode it tracks the global
-  // unified set; scoped to one profile it tracks that profile's own truncation
-  // flag — otherwise a huge default profile keeps "Load more" stuck on while
-  // you browse a small one. The backend reports whether its page was capped
-  // rather than an exact count, so no COUNT(*) runs per refresh.
+  // unified set. When scoped to one profile it must compare that profile's own
+  // loaded rows against that profile's total — otherwise a huge default profile
+  // keeps "Load more" stuck on while you browse a small one (the aggregator's
+  // total sums every profile). Per-profile totals come from the aggregator
+  // (children excluded); fall back to the global total / loaded count.
   const loadedSessionCount = showAllProfiles ? sessions.length : visibleSessions.length
+  const scopedProfileTotal = showAllProfiles ? undefined : sessionProfileTotals[profileScope]
 
-  const hasMoreSessions = showAllProfiles
-    ? Object.values(sessionProfilesTruncated).some(Boolean)
-    : Boolean(sessionProfilesTruncated[profileScope])
+  const knownSessionTotal = Math.max(
+    showAllProfiles ? sessionsTotal : (scopedProfileTotal ?? loadedSessionCount),
+    loadedSessionCount
+  )
 
+  const hasMoreSessions = knownSessionTotal > loadedSessionCount
+
+  const recentsMeta = countLabel(displayAgentSessions.length, knownSessionTotal)
   const displayRecentsCountRef = useRef(0)
   const loadedRecentsCountRef = useRef(0)
   displayRecentsCountRef.current = displayAgentSessions.length
@@ -1381,7 +1386,9 @@ export function ChatSidebar({
                     reposScanning && !projectsSkeletonVisible ? (
                       <GlyphSpinner ariaLabel={s.loading} className="text-[0.6875rem] text-(--ui-text-quaternary)" />
                     ) : undefined
-                  ) : undefined
+                  ) : (
+                    recentsMeta
+                  )
                 }
                 liveSessions={inProject ? agentSessions : undefined}
                 onArchiveSession={onArchiveSession}
@@ -1447,7 +1454,7 @@ export function ChatSidebar({
                         platformName={group.label}
                       />
                     }
-                    labelMeta={String(shownSessions.length)}
+                    labelMeta={countLabel(group.sessions.length, group.total)}
                     onArchiveSession={onArchiveSession}
                     onDeleteSession={onDeleteSession}
                     onResumeSession={onResumeSession}

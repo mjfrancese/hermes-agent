@@ -105,7 +105,6 @@ export function ReviewFileTree() {
   const [animate, setAnimate] = useState(false)
   const armed = useRef(false)
 
-  // eslint-disable-next-line no-restricted-syntax -- legitimate non-atom ref write (see eslint rule comment)
   useEffect(() => {
     if (!open) {
       armed.current = false
@@ -113,7 +112,6 @@ export function ReviewFileTree() {
     }
   }, [open])
 
-  // eslint-disable-next-line no-restricted-syntax -- legitimate non-atom ref write (see eslint rule comment)
   useEffect(() => {
     if (open && !loading && !armed.current) {
       armed.current = true

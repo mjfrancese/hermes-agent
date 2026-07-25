@@ -986,25 +986,15 @@ def cmd_mcp_configure(args):
 
     tool_names = [t[0] for t in all_tools]
 
-    # Same matching semantics as runtime registration (tools/mcp_tool.py):
-    # exact names or fnmatch globs.
-    try:
-        from tools.mcp_tool import matches_name_filter
-    except ImportError:  # pragma: no cover — defensive fallback
-        def matches_name_filter(tool_name, patterns):
-            return tool_name in patterns
-
     if include and isinstance(include, list):
-        include_set = {str(p) for p in include}
+        include_set = set(include)
         pre_selected = {
-            i for i, tn in enumerate(tool_names)
-            if matches_name_filter(tn, include_set)
+            i for i, tn in enumerate(tool_names) if tn in include_set
         }
     elif exclude and isinstance(exclude, list):
-        exclude_set = {str(p) for p in exclude}
+        exclude_set = set(exclude)
         pre_selected = {
-            i for i, tn in enumerate(tool_names)
-            if not matches_name_filter(tn, exclude_set)
+            i for i, tn in enumerate(tool_names) if tn not in exclude_set
         }
     else:
         pre_selected = set(range(len(all_tools)))

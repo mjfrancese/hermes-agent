@@ -17,7 +17,7 @@
 import { useStore } from '@nanostores/react'
 import { useQueryClient } from '@tanstack/react-query'
 import { atom, computed } from 'nanostores'
-import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 
 import { useGatewayRequest } from '@/app/gateway/hooks/use-gateway-request'
 import { useModelControls } from '@/app/session/hooks/use-model-controls'
@@ -113,7 +113,7 @@ function TileChat({
   storedSessionId: string
   view: SessionView
 }) {
-  const { gateway, requestGateway } = useGatewayRequest()
+  const { gatewayRef, requestGateway } = useGatewayRequest()
   const queryClient = useQueryClient()
   const { selectModel } = useModelControls({ queryClient, requestGateway })
   const activeGatewayProfile = useStore($activeGatewayProfile)
@@ -151,20 +151,20 @@ function TileChat({
     () =>
       gatewayOpen ? (
         <ModelMenuPanel
-          gateway={gateway || undefined}
+          gateway={gatewayRef.current || undefined}
           onSelectModel={selectModel}
           profile={activeGatewayProfile}
           requestGateway={requestGateway}
         />
       ) : null,
-    [activeGatewayProfile, gateway, gatewayOpen, requestGateway, selectModel]
+    [activeGatewayProfile, gatewayOpen, gatewayRef, requestGateway, selectModel]
   )
 
   return (
     <SessionViewProvider value={view}>
       <ComposerScopeProvider value={scope}>
         <ChatView
-          gateway={gateway}
+          gateway={gatewayRef.current}
           modelMenuContent={modelMenuContent}
           onAddContextRef={composer.addContextRefAttachment}
           onAddUrl={url => composer.addContextRefAttachment(`@url:${formatRefValue(url)}`, url)}
@@ -253,7 +253,6 @@ export function SessionTilePane({ storedSessionId }: { storedSessionId: string }
   // session.resume before the gateway is OPEN. Persisted tiles mount at boot
   // while it's still connecting — an ungated resume rejected there and
   // latched every restored tile into the error card.
-  // eslint-disable-next-line no-restricted-syntax -- legitimate non-atom ref write (see eslint rule comment)
   useEffect(() => {
     if (!gatewayOpen || runtimeId || tile?.error || resumingRef.current) {
       return
@@ -424,40 +423,6 @@ export function stackSessionTilesIntoMain(): void {
   }
 }
 
-/** The three scalars the tab menu actually renders, derived from the stored
- *  row. Subscribing to `$sessions` + `$projectTree` wholesale re-rendered
- *  every tab's menu wrapper on ANY session-list or tree churn (polls, title
- *  updates in other sessions) — for a context menu that's almost never open.
- *  Same class as the TreeGroup fix (#72245): derive narrowly, bail out unless
- *  the derived values change. */
-function useTileMenuRow(storedSessionId: string): { pinId: string; profile?: string; title: string } {
-  const cache = useRef<{ key: string; value: { pinId: string; profile?: string; title: string } } | null>(null)
-
-  const subscribe = useCallback((onChange: () => void) => {
-    const offSessions = $sessions.listen(onChange)
-    const offTree = $projectTree.listen(onChange)
-
-    return () => {
-      offSessions()
-      offTree()
-    }
-  }, [])
-
-  return useSyncExternalStore(subscribe, () => {
-    const stored = tileStoredRow(storedSessionId)
-    const pinId = stored ? sessionPinId(stored) : storedSessionId
-    const title = tileTitle(storedSessionId)
-    const profile = stored?.profile
-    const key = `${pinId}\u0000${title}\u0000${profile ?? ''}`
-
-    if (cache.current?.key !== key) {
-      cache.current = { key, value: { pinId, profile, title } }
-    }
-
-    return cache.current.value
-  })
-}
-
 /** A session TAB's context menu: the full session verb set (pin, copy id, new
  *  window, branch, rename, archive, delete) — the SAME menu a sidebar row
  *  gets, targeted through the tile delegate (whose verbs are generic over
@@ -479,8 +444,13 @@ export function SessionTabMenu({
   /** Layout-tree pane id — powers the Close-others/right/all verbs. */
   tabPaneId: string
 }) {
-  const { pinId, profile, title } = useTileMenuRow(storedSessionId)
+  // Subscribe for reactivity; the row is read imperatively via tileStoredRow
+  // (which spans both sources), so the values themselves are unused here.
+  useStore($sessions)
+  useStore($projectTree)
   const pinnedSessionIds = useStore($pinnedSessionIds)
+  const stored = tileStoredRow(storedSessionId)
+  const pinId = stored ? sessionPinId(stored) : storedSessionId
   const pinned = pinnedSessionIds.includes(pinId)
 
   return (
@@ -493,11 +463,11 @@ export function SessionTabMenu({
         onHideTabBar={onHideTabBar}
         onPin={() => (pinned ? unpinSession(pinId) : pinSession(pinId))}
         pinned={pinned}
-        profile={profile}
+        profile={stored?.profile}
         sessionId={storedSessionId}
         surface="tab"
         tabPaneId={tabPaneId}
-        title={title}
+        title={tileTitle(storedSessionId)}
       >
         {children}
       </SessionContextMenu>
