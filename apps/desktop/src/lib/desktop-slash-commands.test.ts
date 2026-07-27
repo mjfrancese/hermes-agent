@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 
 import {
   desktopSkinSlashCompletions,
-  desktopSlashCommandArgumentMode,
   desktopSlashDescription,
   desktopSlashUnavailableMessage,
   filterDesktopCommandsCatalog,
@@ -66,7 +65,7 @@ describe('desktop slash command curation', () => {
 
   it('routes /pet through the desktop action handler and drops /pets', () => {
     expect(resolveDesktopCommand('/pet')?.surface).toEqual({ kind: 'action', action: 'pet' })
-    expect(desktopSlashCommandArgumentMode('/pet')).toBe('options')
+    expect(resolveDesktopCommand('/pet')?.args).toBe(true)
     expect(isDesktopSlashSuggestion('/pet')).toBe(true)
     expect(isDesktopSlashCommand('/pet')).toBe(true)
     expect(resolveDesktopCommand('/pets')?.surface).toEqual({ kind: 'unavailable', reason: 'settings' })
@@ -82,14 +81,14 @@ describe('desktop slash command curation', () => {
     expect(desktopSlashUnavailableMessage('/browser')).toBeNull()
     expect(resolveDesktopCommand('/browser')?.surface).toEqual({ kind: 'action', action: 'browser' })
     // Bare /browser expands to its sub-action options in the popover.
-    expect(desktopSlashCommandArgumentMode('/browser')).toBe('options')
+    expect(resolveDesktopCommand('/browser')?.args).toBe(true)
   })
 
   it('routes /compress through the session-compression action', () => {
     // /compress must be an action (session.compress RPC), not exec: the slash
     // worker route times out on large sessions (#44456).
     expect(resolveDesktopCommand('/compress')?.surface).toEqual({ kind: 'action', action: 'compress' })
-    expect(desktopSlashCommandArgumentMode('/compress')).toBe('text')
+    expect(resolveDesktopCommand('/compress')?.args).toBe(true)
     expect(isDesktopSlashCommand('/compress')).toBe(true)
     expect(isDesktopSlashSuggestion('/compress')).toBe(true)
     expect(desktopSlashUnavailableMessage('/compress')).toBeNull()
@@ -145,13 +144,12 @@ describe('desktop slash command curation', () => {
     }
   })
 
-  it('distinguishes free prose from finite slash option lists', () => {
-    expect(desktopSlashCommandArgumentMode('/goal')).toBe('mixed')
-    expect(desktopSlashCommandArgumentMode('/steer')).toBe('text')
-    expect(desktopSlashCommandArgumentMode('/queue')).toBe('text')
-    expect(desktopSlashCommandArgumentMode('/personality')).toBe('options')
-    expect(desktopSlashCommandArgumentMode('/handoff')).toBe('options')
-    expect(desktopSlashCommandArgumentMode('/version')).toBeNull()
+  it('keeps /goal arg text editable instead of sealing it into a chip', () => {
+    // /goal takes free prose (the goal itself) plus subcommands. Without
+    // args:true, Space after the command name committed a sealed directive
+    // chip and the goal text rendered awkwardly after a pill.
+    expect(resolveDesktopCommand('/goal')?.surface).toEqual({ kind: 'exec' })
+    expect(resolveDesktopCommand('/goal')?.args).toBe(true)
   })
 
   it('routes /journey (and aliases) to the memory graph overlay action', () => {

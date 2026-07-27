@@ -91,16 +91,6 @@ export interface SlashCommandBuildCtx {
   sessionId: string
 }
 
-/**
- * How arguments behave in the Desktop composer.
- *
- * - `options` → a finite completion list; picking or fully typing an option may
- *               commit the complete directive as a chip.
- * - `text`    → arbitrary prose; the command and its argument stay editable.
- * - `mixed`   → offers subcommand completions but also accepts arbitrary prose.
- */
-export type DesktopSlashArgumentMode = 'mixed' | 'options' | 'text'
-
 export interface DesktopCommandSpec {
   /** Canonical command, leading slash included (e.g. `/resume`). */
   name: string
@@ -114,8 +104,12 @@ export interface DesktopCommandSpec {
    * the status bar), so the popover doesn't dead-end on inline completion.
    */
   hidden?: boolean
-  /** Composer behavior for text following the command token. */
-  argumentMode?: DesktopSlashArgumentMode
+  /**
+   * The command has an inline options "screen" (theme / personality / session /
+   * platform / toolset list). Picking the bare command in the popover expands to
+   * that argument step instead of committing — mirroring typing `/<cmd> ` by hand.
+   */
+  args?: boolean
 }
 
 const exec = (): DesktopCommandSurface => ({ kind: 'exec' })
@@ -157,22 +151,17 @@ const DESKTOP_COMMAND_SPECS: readonly DesktopCommandSpec[] = [
     name: '/handoff',
     description: 'Hand off this session to a messaging platform',
     surface: action('handoff'),
-    argumentMode: 'options'
+    args: true
   },
   { name: '/profile', description: 'Switch the active Hermes profile', surface: action('profile') },
-  {
-    name: '/skin',
-    description: 'Switch desktop theme or cycle to the next one',
-    surface: action('skin'),
-    argumentMode: 'options'
-  },
-  { name: '/title', description: 'Rename the current session', surface: action('title'), argumentMode: 'text' },
+  { name: '/skin', description: 'Switch desktop theme or cycle to the next one', surface: action('skin'), args: true },
+  { name: '/title', description: 'Rename the current session', surface: action('title') },
   { name: '/help', description: 'Show desktop slash commands', aliases: ['/commands'], surface: action('help') },
   {
     name: '/browser',
     description: 'Manage browser CDP connection [connect|disconnect|status] (local gateway only)',
     surface: action('browser'),
-    argumentMode: 'options'
+    args: true
   },
   {
     name: '/journey',
@@ -188,13 +177,7 @@ const DESKTOP_COMMAND_SPECS: readonly DesktopCommandSpec[] = [
     description: 'Resume a saved session',
     aliases: ['/sessions', '/switch'],
     surface: picker('session'),
-    // `mixed`, not `options`: the argument is a free-text search the picker
-    // fuzzy-matches against titles and previews, so multi-word queries have to
-    // stay typeable. Its completion list also always carries a trailing
-    // "Browse all sessions…" action row, which meant Space-to-accept could
-    // never fall through — the first space wiped the composer and threw the
-    // user into the overlay.
-    argumentMode: 'mixed'
+    args: true
   },
 
   // Backend-executed commands that render useful inline output.
@@ -211,7 +194,7 @@ const DESKTOP_COMMAND_SPECS: readonly DesktopCommandSpec[] = [
     name: '/approvals',
     description: 'Show or set approval mode [manual|smart|off]',
     surface: exec(),
-    argumentMode: 'options'
+    args: true
   },
   {
     name: '/agents',
@@ -219,13 +202,7 @@ const DESKTOP_COMMAND_SPECS: readonly DesktopCommandSpec[] = [
     aliases: ['/tasks'],
     surface: exec()
   },
-  {
-    name: '/background',
-    description: 'Run a prompt in the background',
-    aliases: ['/bg', '/btw'],
-    surface: exec(),
-    argumentMode: 'text'
-  },
+  { name: '/background', description: 'Run a prompt in the background', aliases: ['/bg', '/btw'], surface: exec() },
   // /compress must be an action (session.compress RPC), not exec: the slash
   // worker route times out on large sessions (30s WS / 45s pipe) before the
   // LLM summarise call finishes, then command.dispatch surfaces a bogus
@@ -235,26 +212,16 @@ const DESKTOP_COMMAND_SPECS: readonly DesktopCommandSpec[] = [
     description: 'Compress this conversation context',
     aliases: ['/compact'],
     surface: action('compress'),
-    argumentMode: 'text'
+    args: true
   },
   { name: '/debug', description: 'Create a debug report', surface: exec() },
-  {
-    name: '/goal',
-    description: 'Manage the standing goal for this session',
-    surface: exec(),
-    argumentMode: 'mixed'
-  },
-  {
-    name: '/personality',
-    description: 'Switch personality for this session',
-    surface: exec(),
-    argumentMode: 'options'
-  },
+  { name: '/goal', description: 'Manage the standing goal for this session', surface: exec(), args: true },
+  { name: '/personality', description: 'Switch personality for this session', surface: exec(), args: true },
   {
     name: '/pet',
     description: 'Toggle or adopt a petdex mascot (/pet, /pet list, /pet boba)',
     surface: action('pet'),
-    argumentMode: 'options'
+    args: true
   },
   {
     name: '/hatch',
@@ -262,13 +229,7 @@ const DESKTOP_COMMAND_SPECS: readonly DesktopCommandSpec[] = [
     aliases: ['/generate-pet'],
     surface: action('hatch')
   },
-  {
-    name: '/queue',
-    description: 'Queue a prompt for the next turn',
-    aliases: ['/q'],
-    surface: exec(),
-    argumentMode: 'text'
-  },
+  { name: '/queue', description: 'Queue a prompt for the next turn', aliases: ['/q'], surface: exec() },
   { name: '/retry', description: 'Retry the last user message', surface: exec() },
   { name: '/rollback', description: 'List or restore filesystem checkpoints', surface: exec() },
   {
@@ -281,19 +242,9 @@ const DESKTOP_COMMAND_SPECS: readonly DesktopCommandSpec[] = [
     description: 'Show current session status',
     surface: rpc('session.status', ctx => ({ session_id: ctx.sessionId }))
   },
-  {
-    name: '/steer',
-    description: 'Steer the current run after the next tool call',
-    surface: exec(),
-    argumentMode: 'text'
-  },
+  { name: '/steer', description: 'Steer the current run after the next tool call', surface: exec(), args: true },
   { name: '/stop', description: 'Stop running background processes', surface: exec() },
-  {
-    name: '/tools',
-    description: 'List or toggle tools available to the agent',
-    surface: exec(),
-    argumentMode: 'options'
-  },
+  { name: '/tools', description: 'List or toggle tools available to the agent', surface: exec(), args: true },
   { name: '/undo', description: 'Remove the last user/assistant exchange', surface: exec() },
   { name: '/usage', description: 'Show token usage for this session', surface: exec() },
   { name: '/version', description: 'Show Hermes Agent version', surface: exec() },
@@ -482,8 +433,13 @@ export function desktopSlashDescription(command: string, fallback = ''): string 
   return SPEC_BY_NAME.get(canonicalDesktopSlashCommand(command))?.description || fallback
 }
 
-export function desktopSlashCommandArgumentMode(command: string): DesktopSlashArgumentMode | null {
-  return resolveDesktopCommand(command)?.argumentMode ?? null
+/**
+ * True when picking the bare command should expand to its inline argument
+ * options (theme / personality / session / platform / toolset) rather than
+ * committing immediately. Lets the popover act as a two-step picker.
+ */
+export function desktopSlashCommandTakesArgs(command: string): boolean {
+  return resolveDesktopCommand(command)?.args ?? false
 }
 
 export function desktopSkinSlashCompletions(

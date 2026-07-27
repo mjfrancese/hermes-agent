@@ -32,7 +32,7 @@ import { latestSessionTodos } from '@/lib/todos'
 import { $billingSettingsRequest } from '@/store/billing-block'
 import { setCronFocusJobId } from '@/store/cron'
 import { $pinnedSessionIds, pinSession, restoreWorktree, unpinSession } from '@/store/layout'
-import { $previewTarget } from '@/store/preview'
+import { $filePreviewTarget, $previewTarget } from '@/store/preview'
 import { $activeGatewayProfile, $freshSessionRequest, $profileScope, refreshActiveProfile } from '@/store/profile'
 import { $startWorkSessionRequest, followActiveSessionCwd } from '@/store/projects'
 import {
@@ -51,6 +51,9 @@ import {
   sessionPinId,
   setAwaitingResponse,
   setBusy,
+  setCurrentModel,
+  setCurrentModelSource,
+  setCurrentProvider,
   setMessages
 } from '@/store/session'
 import { focusedSessionNeedsRoute, focusOpenSession } from '@/store/session-states'
@@ -75,11 +78,10 @@ import { closeAllTerminals } from '../right-sidebar/terminal/terminals'
 import {
   $workspaceIsPage,
   CRON_ROUTE,
-  navigateToWorkspacePage,
   routeSessionId,
   sessionRoute,
   SETTINGS_ROUTE,
-  syncWorkspaceRoute
+  syncWorkspaceIsPage
 } from '../routes'
 import { SessionPickerOverlay } from '../session-picker-overlay'
 import { SessionSwitcher } from '../session-switcher'
@@ -184,12 +186,11 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     routedSessionIdRef.current = null
   }, [])
 
-  // Point the workspace at the route: the pane contribution re-registers
-  // headerVeto from $workspaceIsPage (so the main zone's tab bar stands down
-  // on pages), and a page route fronts the pane so it can't stay stuck behind
-  // a focused session tile.
+  // Mirror "the workspace is showing a full page" into its atom — the
+  // workspace pane contribution re-registers headerVeto from it, so the main
+  // zone's tab bar stands down on pages (and returns with the chat).
   useEffect(() => {
-    syncWorkspaceRoute(location.pathname)
+    syncWorkspaceIsPage(location.pathname)
   }, [location.pathname])
 
   const {
@@ -266,7 +267,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
 
   const { refreshHermesConfig, sttEnabled, voiceMaxRecordingSeconds } = useHermesConfig({ activeSessionIdRef })
 
-  const { applySavedMainModel, refreshCurrentModel, selectModel } = useModelControls({
+  const { refreshCurrentModel, selectModel, updateModelOptionsCache } = useModelControls({
     queryClient,
     requestGateway
   })
@@ -398,9 +399,13 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   // follows) + the preview server restart handler, layered over the base
   // gateway event stream exactly like DesktopController.
   const { handleDesktopGatewayEvent, restartPreviewServer } = usePreviewRouting({
+    activeSessionIdRef,
     baseHandleGatewayEvent: handleGatewayEvent,
     currentCwd,
-    requestGateway
+    currentView,
+    requestGateway,
+    routedSessionId,
+    selectedStoredSessionId
   })
 
   // Composer @-mention context suggestions (files/dirs under the cwd).
@@ -720,10 +725,11 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   // deep links, native-notification nav, preview-shortcut enablement,
   // remembered-session restore, and cross-window session-list sync.
   const previewTarget = useStore($previewTarget)
+  const filePreviewTarget = useStore($filePreviewTarget)
 
   useDesktopIntegrations({
     chatOpen,
-    hasPreview: Boolean(previewTarget),
+    hasPreview: Boolean(filePreviewTarget || previewTarget),
     locationPathname: location.pathname,
     navigate,
     refreshSessions,
@@ -992,7 +998,10 @@ export function ContribWiring({ children }: { children: ReactNode }) {
               void queryClient.invalidateQueries({ queryKey: ['model-options'] })
             }}
             onMainModelChanged={(provider, model) => {
-              applySavedMainModel(provider, model)
+              setCurrentProvider(provider)
+              setCurrentModel(model)
+              setCurrentModelSource('default')
+              updateModelOptionsCache($activeSessionId.get(), provider, model, true)
               void refreshCurrentModel()
               void queryClient.invalidateQueries({ queryKey: ['model-options'] })
             }}
@@ -1006,7 +1015,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
             initialSection={commandCenterInitialSection}
             onClose={closeOverlayToPreviousRoute}
             onDeleteSession={removeSession}
-            onNavigateRoute={path => navigateToWorkspacePage(navigate, path)}
+            onNavigateRoute={path => navigate(path)}
             onOpenSession={sessionId => navigate(sessionRoute(sessionId))}
           />
         </Suspense>

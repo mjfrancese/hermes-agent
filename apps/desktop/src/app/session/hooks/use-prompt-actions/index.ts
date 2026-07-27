@@ -33,7 +33,6 @@ import {
 } from '@/store/session'
 import { clearSessionSubagents } from '@/store/subagents'
 import { clearSessionTodos } from '@/store/todos'
-import { setSessionDraftingTool } from '@/store/tool-drafting'
 
 import type {
   ClientSessionState,
@@ -593,7 +592,6 @@ export function usePromptActions({
     clearSessionTodos(sessionId)
     clearSessionSubagents(sessionId)
     resetSessionBackground(sessionId)
-    setSessionDraftingTool(sessionId, '')
     // Stop ends the turn, so the gateway is no longer blocked on any prompt it
     // raised. Drop this session's pending clarify / approval / sudo / secret so
     // a dead panel (and the sidebar "needs input" dot) can't linger and accept

@@ -340,7 +340,11 @@ export function useStatusbarItems({
         : cloud
           ? copy.connectionCloud(connection.remoteHost)
           : copy.connectionRemote(connection.remoteHost),
-      // Label already names the host — no "click to manage" tip lecture.
+      title: ssh
+        ? copy.connectionSshTooltip(connection.remoteHost)
+        : cloud
+          ? copy.connectionCloudTooltip(connection.remoteHost)
+          : copy.connectionRemoteTooltip(connection.remoteHost),
       to: `${SETTINGS_ROUTE}?tab=gateway`
     }
   }, [connection?.mode, connection?.remoteHost, connection?.remoteKind, copy])
@@ -374,8 +378,7 @@ export function useStatusbarItems({
         label: copy.gateway,
         menuClassName: 'w-72',
         menuContent: gatewayMenuContent,
-        // Tip only when there's a real status reason — not "gateway status" restating the label.
-        title: inferenceStatus?.reason || undefined,
+        title: inferenceStatus?.reason || copy.gatewayTitle,
         toggleLabel: copy.gateway,
         variant: 'menu'
       },
@@ -443,6 +446,7 @@ export function useStatusbarItems({
         icon: <Clock className="size-3" />,
         id: 'cron',
         label: copy.cron,
+        title: copy.openCron,
         to: CRON_ROUTE,
         toggleLabel: copy.cron,
         variant: 'action'
@@ -451,6 +455,7 @@ export function useStatusbarItems({
         icon: <Globe className="size-3" />,
         id: 'webhooks',
         label: copy.webhooks,
+        title: copy.openWebhooks,
         to: WEBHOOKS_ROUTE,
         toggleLabel: copy.webhooks,
         variant: 'action'
@@ -487,6 +492,7 @@ export function useStatusbarItems({
         icon: <Loader2 className="size-3 animate-spin" />,
         id: 'running-timer',
         label: copy.turnRunning,
+        title: copy.currentTurnElapsed,
         toggleLabel: copy.toggleRunningTimer,
         variant: 'text'
       },
@@ -505,6 +511,7 @@ export function useStatusbarItems({
             sessionId={activeSessionId}
           />
         ),
+        title: copy.openContextUsage,
         toggleLabel: copy.toggleContextUsage,
         variant: 'menu'
       },
@@ -513,6 +520,7 @@ export function useStatusbarItems({
         hidden: !sessionStartedAt,
         id: 'session-timer',
         label: copy.session,
+        title: copy.runtimeSessionElapsed,
         toggleLabel: copy.toggleSessionTimer,
         variant: 'text'
       },

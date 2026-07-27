@@ -64,12 +64,10 @@ import {
   profileRemoteOverride,
   profileSshOverride,
   resolveAuthMode,
-  resolveProfileBackendRoute,
   resolveTestWsUrl,
   savedProfileSsh,
   tokenPreview
 } from './connection-config'
-import { describeCrashReason, installCrashForensics } from './crash-forensics'
 import { adoptServedDashboardToken } from './dashboard-token'
 import { loadOrCreateInstallationId, sshOwnershipId } from './desktop-installation'
 import {
@@ -81,7 +79,6 @@ import {
   shouldRemoveAppBundle,
   uninstallArgsForMode
 } from './desktop-uninstall'
-import { describeDevCdpDecision, resolveDevCdpPort } from './dev-cdp'
 import { installEmbedReferer } from './embed-referer'
 import { createEventDeduper } from './event-dedupe'
 import { findGitBash as _findGitBash } from './find-git-bash'
@@ -145,16 +142,9 @@ import { createKeepAwake } from './power-save'
 import { FirstRunSetupResetError, runPrimaryBackendStartup } from './primary-backend-startup'
 import { rehomePrimaryConnection } from './primary-connection-rehome'
 import { decideProfileDeleteAction, profileNameFromDeleteRequest, resolveRouteProfile } from './profile-delete-routing'
-import { fetchPrimaryProfileSessions } from './profile-session-routing'
 import { createQuickEntryShortcut, quickEntryWindowBounds, sanitizeQuickEntrySettings } from './quick-entry'
-import { type ActiveWork, mergeActiveWork, normalizeActiveWork, quitPromptFor } from './quit-guard'
 import * as remoteLifecycle from './remote-lifecycle'
-import {
-  RemoteLivenessTracker,
-  RemoteRevalidationCoordinator,
-  revalidatePooledRemoteBackends,
-  revalidateRemoteConnection
-} from './remote-liveness'
+import { RemoteLivenessTracker, RemoteRevalidationCoordinator, revalidateRemoteConnection } from './remote-liveness'
 import {
   buildSessionWindowUrl,
   chatWindowWebPreferences,
@@ -271,29 +261,6 @@ if (REMOTE_DISPLAY_REASON) {
   console.log(
     `[hermes] remote display detected (${REMOTE_DISPLAY_REASON}); disabling GPU hardware acceleration to prevent flicker`
   )
-}
-
-// Renderer debugging port. On for dev-server runs (`hgui` / `npm run dev`) so
-// the CDP tooling in scripts/ can attach; never for a packaged build — see
-// electron/dev-cdp.ts. Must run before app `ready` like the switches above;
-// Chromium binds it at launch.
-const DEV_CDP = resolveDevCdpPort({ env: process.env, isPackaged: IS_PACKAGED, devServer: DEV_SERVER })
-
-if (DEV_CDP.port) {
-  app.commandLine.appendSwitch('remote-debugging-port', String(DEV_CDP.port))
-  // Loopback only. Chromium already defaults to 127.0.0.1, but say it out loud
-  // so a future edit can't widen it by omission.
-  app.commandLine.appendSwitch('remote-debugging-address', '127.0.0.1')
-  console.log(
-    `[hermes] renderer debugging on http://127.0.0.1:${DEV_CDP.port} — anything that can reach it ` +
-      'can run code in the renderer. HERMES_DESKTOP_CDP_PORT=off to disable.'
-  )
-} else {
-  const why = describeDevCdpDecision(DEV_CDP)
-
-  if (why) {
-    console.warn(`[hermes] ${why}`)
-  }
 }
 
 // WSLg: Chromium blocklists the Mesa vGPU → software compositing → typing lag.
@@ -632,10 +599,6 @@ const DESKTOP_LOG_DISCARD_BYTES = DESKTOP_LOG_MAX_BYTES * 4
 const desktopLogBackupPath = n => `${DESKTOP_LOG_PATH}.${n}`
 const BOOT_FAKE_MODE = process.env.HERMES_DESKTOP_BOOT_FAKE === '1'
 const BOOT_FAKE_ERROR = process.env.HERMES_DESKTOP_BOOT_FAKE_ERROR || ''
-// Automated teardown (Playwright's app.close(), harness scripts) quits with
-// nobody to answer a modal, so the active-work confirmation would hang the
-// caller instead of letting the process exit. Force quits set this.
-const SKIP_QUIT_CONFIRM = process.env.HERMES_DESKTOP_SKIP_QUIT_CONFIRM === '1'
 
 const BOOT_FAKE_STEP_MS = (() => {
   const raw = Number.parseInt(String(process.env.HERMES_DESKTOP_BOOT_FAKE_STEP_MS || ''), 10)
@@ -1247,14 +1210,6 @@ function rememberLog(chunk) {
   }
 
   scheduleDesktopLogFlush()
-}
-
-installCrashForensics({ flush: flushDesktopLogBufferSync, log: rememberLog })
-
-// A rejected loadURL leaves a blank window and, unhandled, no trace anywhere
-// the user can send us. `label` names the surface so the log says which one.
-function loadWindowUrl(win, url, label) {
-  win.loadURL(url).catch(error => rememberLog(`${label} failed to load: ${describeCrashReason(error)}`))
 }
 
 function openExternalUrl(rawUrl) {
@@ -2538,12 +2493,6 @@ let updateInFlight = false
 // set, window-all-closed calls app.quit() on every platform so the process
 // actually dies and the hand-off script can proceed immediately.
 let isQuittingForHandoff = false
-
-// Quit-guard latches: one while the confirmation is on screen (a second
-// Cmd-Q must not stack dialogs), one after the user has said "quit anyway"
-// (the app.quit() that follows re-enters before-quit and must pass through).
-let quitPromptOpen = false
-let quitConfirmedWithActiveWork = false
 
 // Resolve the staged updater binary. The Tauri installer copies itself to
 // HERMES_HOME/hermes-setup.exe on a successful install (see
@@ -7777,28 +7726,15 @@ function primaryProfileKey() {
   return readActiveDesktopProfile() || 'default'
 }
 
-// Options describing the current connection setup for `resolveProfileBackendRoute`.
-function profileRouteOptions(profile) {
-  return {
-    globalRemote: globalRemoteActive(),
-    primaryProfile: primaryProfileKey(),
-    profileRemoteOverride: Boolean(profileHasRemoteOverride(profile))
-  }
-}
-
-// Resolve a backend connection for the given profile, per the routing table in
-// resolveProfileBackendRoute(). An empty / unknown profile resolves to the
-// primary, so legacy callers are unchanged.
+// Resolve a backend connection for the given profile. Routes the primary
+// profile to startHermes() (the window backend: boot UI, bootstrap, remote
+// mode), and any OTHER profile to a lazily-spawned pool backend. An empty /
+// unknown profile resolves to the primary, so all legacy callers are unchanged.
 async function ensureBackend(profile) {
   const key = profile && String(profile).trim() ? String(profile).trim() : primaryProfileKey()
-  const route = resolveProfileBackendRoute(key, profileRouteOptions(key))
 
-  if (route.backend === 'primary') {
-    const connection = await startHermes()
-
-    // A shared backend still owes the caller its profile scope, so renderer-side
-    // WebSocket, filesystem, and cache routing target the selected profile.
-    return route.descriptorProfile ? { ...connection, profile: route.descriptorProfile } : connection
+  if (key === primaryProfileKey()) {
+    return startHermes()
   }
 
   const existing = backendPool.get(key)
@@ -7811,15 +7747,7 @@ async function ensureBackend(profile) {
 
   evictLruPoolBackends(POOL_MAX_BACKENDS - 1)
 
-  const entry = {
-    process: null,
-    port: null,
-    token: null,
-    connectionPromise: null,
-    lastActiveAt: Date.now(),
-    remoteBaseUrl: null
-  }
-
+  const entry = { process: null, port: null, token: null, connectionPromise: null, lastActiveAt: Date.now() }
   entry.connectionPromise = spawnPoolBackend(key, entry).catch(error => {
     backendPool.delete(key)
     throw error
@@ -7915,10 +7843,6 @@ async function spawnPoolBackend(profile, entry) {
 
   if (remote) {
     await waitForHermes(remote.baseUrl, remote.token, undefined, remote.authMode)
-
-    // Recorded on the entry so revalidation can probe this descriptor without
-    // awaiting connectionPromise, which may still be pending for a sibling.
-    entry.remoteBaseUrl = remote.baseUrl
 
     return {
       ...remote,
@@ -8510,14 +8434,12 @@ function spawnSecondaryWindow({ sessionId, watch }: { sessionId?: string; watch?
 
   wireCommonWindowHandlers(win, zoomWiringForWindowKind('chat'))
 
-  loadWindowUrl(
-    win,
+  win.loadURL(
     buildSessionWindowUrl(sessionId, {
       devServer: DEV_SERVER,
       rendererIndexPath: DEV_SERVER ? undefined : resolveRendererIndex(),
       watch
-    }),
-    'Session window'
+    })
   )
 
   return win
@@ -8597,7 +8519,11 @@ function createInstanceWindow() {
     instanceWindows.delete(win)
   })
 
-  loadWindowUrl(win, DEV_SERVER || pathToFileURL(resolveRendererIndex()).toString(), 'Instance window')
+  if (DEV_SERVER) {
+    win.loadURL(DEV_SERVER)
+  } else {
+    win.loadURL(pathToFileURL(resolveRendererIndex()).toString())
+  }
 
   return win
 }
@@ -8709,7 +8635,7 @@ function spawnPetOverlayWindow(bounds) {
     }
   })
 
-  loadWindowUrl(win, petOverlayUrl(), 'Pet overlay')
+  win.loadURL(petOverlayUrl())
 
   return win
 }
@@ -8861,7 +8787,7 @@ function spawnQuickEntryWindow() {
     }
   })
 
-  loadWindowUrl(win, quickEntryUrl(), 'Quick entry')
+  win.loadURL(quickEntryUrl())
 
   return win
 }
@@ -9155,7 +9081,11 @@ function createWindow() {
     rememberLog(`[renderer console] ${text} (${src}:${lineNo})`)
   })
 
-  loadWindowUrl(mainWindow, DEV_SERVER || pathToFileURL(resolveRendererIndex()).toString(), 'Renderer')
+  if (DEV_SERVER) {
+    mainWindow.loadURL(DEV_SERVER)
+  } else {
+    mainWindow.loadURL(pathToFileURL(resolveRendererIndex()).toString())
+  }
 
   // Start the Python backend NOW, in parallel with the renderer load — not on
   // did-finish-load. The backend cold boot (spawn → port announce → /api/status)
@@ -9187,8 +9117,6 @@ ipcMain.handle('hermes:connection:revalidate', async () => {
   const connectionPromise = backendConnectionState.getPromise()
 
   if (!connectionPromise) {
-    await revalidatePool()
-
     return { ok: true, rebuilt: false }
   }
 
@@ -9196,17 +9124,14 @@ ipcMain.handle('hermes:connection:revalidate', async () => {
   // share this primary connection. Coalesce simultaneous requests so one outage
   // produces one failure observation rather than exhausting the whole streak.
   return remoteRevalidation.run(connectionPromise, async () => {
-    const [result] = await Promise.all([
-      revalidateRemoteConnection({
-        connectionPromise,
-        currentConnectionPromise: () => backendConnectionState.getPromise(),
-        log: rememberLog,
-        probe: fetchPublicJson,
-        resetConnection: resetHermesConnection,
-        tracker: remoteLiveness
-      }),
-      revalidatePool()
-    ])
+    const result = await revalidateRemoteConnection({
+      connectionPromise,
+      currentConnectionPromise: () => backendConnectionState.getPromise(),
+      log: rememberLog,
+      probe: fetchPublicJson,
+      resetConnection: resetHermesConnection,
+      tracker: remoteLiveness
+    })
 
     // A rebuilt SSH connection must also tear down its tunnel/master before the
     // renderer re-dials (which only happens after this handler resolves), so the
@@ -9224,20 +9149,6 @@ ipcMain.handle('hermes:connection:revalidate', async () => {
     return result
   })
 })
-
-// Pooled remote descriptors get the same treatment as the primary: they have no
-// child process to signal their host's death, and the renderer's keepalive touch
-// spares them from the idle reaper, so nothing else can retire a dead one.
-function revalidatePool() {
-  return revalidatePooledRemoteBackends({
-    entries: backendPool.entries(),
-    log: rememberLog,
-    probe: fetchPublicJson,
-    stopBackend: stopPoolBackend,
-    tracker: remoteLiveness
-  })
-}
-
 ipcMain.handle('hermes:backend:touch', async (_event, profile) => {
   touchPoolBackend(profile)
 
@@ -9864,7 +9775,12 @@ async function fetchProfilesSessionSlice(searchParams, remoteProfiles) {
       return remoteSessionList(requested, searchParams)
     }
 
-    return fetchPrimaryProfileSessions(searchParams, fetchJsonForProfile)
+    const primary = await ensureBackend(null)
+
+    return fetchJson(`${primary.baseUrl}/api/profiles/sessions?${searchParams}`, primary.token, {
+      method: 'GET',
+      timeoutMs: DEFAULT_FETCH_TIMEOUT_MS
+    }).catch(() => ({ sessions: [], total: 0, profile_totals: {} }))
   }
 
   return mergeRemoteProfileSessions(searchParams, remoteProfiles)
@@ -9879,7 +9795,12 @@ async function mergeRemoteProfileSessions(searchParams, remoteProfiles) {
   const offset = Math.max(0, Number(searchParams.get('offset')) || 0)
   const order = searchParams.get('order') === 'created' ? 'started_at' : 'last_active'
 
-  const base = (await fetchPrimaryProfileSessions(searchParams, fetchJsonForProfile)) as any
+  const primary = await ensureBackend(null)
+
+  const base = (await fetchJson(`${primary.baseUrl}/api/profiles/sessions?${searchParams}`, primary.token, {
+    method: 'GET',
+    timeoutMs: DEFAULT_FETCH_TIMEOUT_MS
+  }).catch(() => ({ sessions: [], total: 0, profile_totals: {} }))) as any
 
   // Over-fetch each remote from offset 0 (limit+offset rows) so the merged window
   // is correct for this page — mirrors the primary's per-profile over-fetch.
@@ -9938,7 +9859,10 @@ ipcMain.handle('hermes:api', async (_event, request) => {
   const connection = await ensureBackend(routeProfile)
   const timeoutMs = resolveTimeoutMs(request?.timeoutMs, DEFAULT_FETCH_TIMEOUT_MS)
 
-  const requestPath = pathWithGlobalRemoteProfile(request.path, profile, profileRouteOptions(profile))
+  const requestPath = pathWithGlobalRemoteProfile(request.path, profile, {
+    globalRemote: globalRemoteActive(),
+    profileRemoteOverride: profileHasRemoteOverride(profile)
+  })
 
   const url = `${connection.baseUrl}${requestPath}`
 
@@ -10168,20 +10092,6 @@ ipcMain.handle('hermes:normalizePreviewTarget', (_event, target, baseDir) =>
 ipcMain.handle('hermes:watchPreviewFile', (_event, url) => watchPreviewFile(String(url || '')))
 
 ipcMain.handle('hermes:stopPreviewFileWatch', (_event, id) => stopPreviewFileWatch(String(id || '')))
-
-// Each renderer reports the turns it has in flight; the quit guard reads the
-// merged picture. Keyed by webContents id so a closed window stops counting.
-const activeWorkByWebContents = new Map<number, ActiveWork>()
-
-ipcMain.on('hermes:active-work', (event, payload) => {
-  const id = event.sender.id
-
-  if (!activeWorkByWebContents.has(id)) {
-    event.sender.once('destroyed', () => activeWorkByWebContents.delete(id))
-  }
-
-  activeWorkByWebContents.set(id, normalizeActiveWork(payload))
-})
 
 ipcMain.on('hermes:titlebar-theme', (_event, payload) => {
   if (!payload || !isHexColor(payload.background) || !isHexColor(payload.foreground)) {
@@ -11448,58 +11358,7 @@ function configureSpellChecker() {
   }
 }
 
-// Ask before a quit kills a turn in flight. True when the quit was intercepted
-// and the confirmation is on screen; "Quit Anyway" re-enters before-quit with
-// the latch set and falls straight through to the teardown below.
-function heldQuitForActiveWork(event: Electron.Event): boolean {
-  if (SKIP_QUIT_CONFIRM || quitConfirmedWithActiveWork || quitPromptOpen) {
-    return false
-  }
-
-  const prompt = quitPromptFor(mergeActiveWork(activeWorkByWebContents.values()), isQuittingForHandoff)
-  const parent = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
-
-  if (!prompt || !parent || parent.isDestroyed()) {
-    return false
-  }
-
-  event.preventDefault()
-  quitPromptOpen = true
-
-  void dialog
-    .showMessageBox(parent, {
-      buttons: ['Keep Running', 'Quit Anyway'],
-      cancelId: 0,
-      defaultId: 0,
-      detail: prompt.detail,
-      message: prompt.message,
-      type: 'question'
-    })
-    .then(({ response }) => {
-      quitPromptOpen = false
-
-      if (response === 1) {
-        quitConfirmedWithActiveWork = true
-        app.quit()
-      }
-    })
-    .catch(() => {
-      // A dialog we can't show must not become a quit we can't perform.
-      quitPromptOpen = false
-      quitConfirmedWithActiveWork = true
-      app.quit()
-    })
-
-  return true
-}
-
 app.on('before-quit', event => {
-  // Runs ahead of every teardown below, so "Keep Running" leaves the app
-  // exactly as it was.
-  if (heldQuitForActiveWork(event)) {
-    return
-  }
-
   if ((sshConnections.size > 0 || sshBootstrapCoordinator.promises().length > 0) && !sshQuitTeardownDone) {
     event.preventDefault()
     sshBootstrapCoordinator.cancelAll()
