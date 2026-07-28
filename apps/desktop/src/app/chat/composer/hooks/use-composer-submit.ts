@@ -9,7 +9,6 @@ import { enqueueQueuedPrompt, type QueuedPromptEntry } from '@/store/composer-qu
 
 import { cloneAttachments, type QueueEditState } from '../composer-utils'
 import { onComposerSubmitRequest } from '../focus'
-import { pathifyRefs } from '../path-refs'
 import { composerPlainText } from '../rich-editor'
 import { useComposerScope } from '../scope'
 import type { ChatBarProps } from '../types'
@@ -140,10 +139,7 @@ export function useComposerSubmit({
       }
     }
 
-    // A path that never got its committing space (`@apps/desktop/` left by a Tab
-    // descend, then Enter) is still the reference the user picked — promote it
-    // on the way out so it attaches instead of submitting as inert text.
-    const text = pathifyRefs(draftRef.current)
+    const text = draftRef.current
     const payloadPresent = text.trim().length > 0 || attachments.length > 0
 
     // A clarify card parked on this session owns the turn: the agent is blocked

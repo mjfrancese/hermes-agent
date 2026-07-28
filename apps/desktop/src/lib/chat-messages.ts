@@ -311,12 +311,7 @@ function displayContentForMessage(role: SessionMessage['role'], content: unknown
   const attachedContext = textContent.slice(marker.index + marker[0].length)
   const refs = [...new Set(Array.from(attachedContext.matchAll(CONTEXT_REF_RE)).map(match => match[0]))]
 
-  // The prose keeps the `@file:` token the user typed, so it already chips in
-  // place. Only hoist a ref the prose is missing — a turn persisted by an older
-  // backend that stripped the tokens. Re-listing an inline ref would chip twice.
-  const missing = refs.filter(ref => !visibleText.includes(ref))
-
-  return [missing.join('\n'), visibleText].filter(Boolean).join('\n\n') || visibleText
+  return [refs.join('\n'), visibleText].filter(Boolean).join('\n\n') || visibleText
 }
 
 function transcriptContent(displayKind: SessionMessage['display_kind'], content: string): string | null {

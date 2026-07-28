@@ -10,7 +10,7 @@ import { $attentionSessionIds, $workingSessionIds } from '@/store/session-states
 import { $switcherIndex, $switcherOpen, $switcherSessions, closeSwitcher } from '@/store/session-switcher'
 
 import { HUD_ITEM, HUD_POSITION, HUD_SURFACE, HUD_TEXT } from './floating-hud'
-import { openSession } from './open-session'
+import { sessionRoute } from './routes'
 
 // Compact session-switcher HUD — keyboard-driven from `use-keybinds`, rows
 // clickable via mousedown (Ctrl+click on macOS). No Dialog: Tab stays global.
@@ -39,7 +39,7 @@ export function SessionSwitcher() {
 
   const pick = (sessionId: string) => {
     closeSwitcher()
-    openSession(sessionId, navigate)
+    navigate(sessionRoute(sessionId))
   }
 
   return createPortal(

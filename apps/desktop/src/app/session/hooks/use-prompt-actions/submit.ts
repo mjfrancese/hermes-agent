@@ -543,13 +543,7 @@ export function useSubmitPrompt(deps: SubmitPromptDeps) {
         const submitParams = (targetId: string) => ({
           session_id: targetId,
           text,
-          ...(interrupted && { interrupted }),
-          // A queue drain is a "run after" message, never a live-turn
-          // correction. The flag tells the gateway's busy path to hold it for
-          // the next turn untouched — without it, losing the settle race
-          // (client saw idle, server still unwinding) redirects or interrupts
-          // the live turn with text the user explicitly queued.
-          ...(options?.fromQueue && { queued: true })
+          ...(interrupted && { interrupted })
         })
 
         // On sleep/wake the gateway's in-memory session may have been cleared

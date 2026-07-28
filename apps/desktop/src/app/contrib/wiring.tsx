@@ -53,6 +53,7 @@ import {
   setBusy,
   setMessages
 } from '@/store/session'
+import { focusedSessionNeedsRoute, focusOpenSession } from '@/store/session-states'
 import { clearSessionTodos, setSessionTodos, todosForHydration } from '@/store/todos'
 import { isSecondaryWindow } from '@/store/windows'
 import { useSkinCommand } from '@/themes/use-skin-command'
@@ -65,14 +66,21 @@ import { useGatewayRequest } from '../gateway/hooks/use-gateway-request'
 import { useKeybinds } from '../hooks/use-keybinds'
 import { ModelPickerOverlay } from '../model-picker-overlay'
 import { ModelVisibilityOverlay } from '../model-visibility-overlay'
-import { openSession } from '../open-session'
 import { PetGenerateOverlay } from '../pet-generate/pet-generate-overlay'
 import { FileActionDialogs } from '../right-sidebar/file-actions'
 import { RemoteFolderPicker } from '../right-sidebar/files/remote-picker'
 import { resetProjectTreeState } from '../right-sidebar/files/use-project-tree'
 import { PersistentTerminal } from '../right-sidebar/terminal/persistent'
 import { closeAllTerminals } from '../right-sidebar/terminal/terminals'
-import { CRON_ROUTE, navigateToWorkspacePage, routeSessionId, SETTINGS_ROUTE, syncWorkspaceRoute } from '../routes'
+import {
+  $workspaceIsPage,
+  CRON_ROUTE,
+  navigateToWorkspacePage,
+  routeSessionId,
+  sessionRoute,
+  SETTINGS_ROUTE,
+  syncWorkspaceRoute
+} from '../routes'
 import { SessionPickerOverlay } from '../session-picker-overlay'
 import { SessionSwitcher } from '../session-switcher'
 import { useBackgroundQueueDrain } from '../session/hooks/use-background-queue-drain'
@@ -812,8 +820,15 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     onRemoveAttachment: id => void composer.removeAttachment(id),
     onRestoreToMessage: restoreToMessage,
     // Already on screen (open tile, or the main session)? Jump to its tab;
-    // otherwise load it into main. Same door every other session link uses.
-    onResumeSession: sessionId => openSession(sessionId, navigate),
+    // otherwise load it into main. From a full page (artifacts, skills, …) a
+    // `'main'` hit still has to route back: fronting the workspace tab alone
+    // leaves the page showing, so clicking the ACTIVE session was a no-op and
+    // the user had to bounce off another row to get back to the chat.
+    onResumeSession: sessionId => {
+      if (focusedSessionNeedsRoute(focusOpenSession(sessionId), $workspaceIsPage.get())) {
+        navigate(sessionRoute(sessionId))
+      }
+    },
     onRetryResume: sessionId => void resumeSession(sessionId, true),
     onSteer: steerPrompt,
     onSubmit: submitText,
@@ -950,7 +965,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
         />
       )}
       <ModelPickerOverlay gateway={gateway || undefined} onSelect={selectModel} profile={activeGatewayProfile} />
-      <SessionPickerOverlay onResume={sessionId => openSession(sessionId, navigate)} />
+      <SessionPickerOverlay onResume={resumeSession} />
       <ModelVisibilityOverlay
         gateway={gateway || undefined}
         onOpenProviders={openProviderSettings}
@@ -992,7 +1007,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
             onClose={closeOverlayToPreviousRoute}
             onDeleteSession={removeSession}
             onNavigateRoute={path => navigateToWorkspacePage(navigate, path)}
-            onOpenSession={sessionId => openSession(sessionId, navigate)}
+            onOpenSession={sessionId => navigate(sessionRoute(sessionId))}
           />
         </Suspense>
       )}
@@ -1007,7 +1022,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
         <Suspense fallback={null}>
           <CronView
             onClose={closeOverlayToPreviousRoute}
-            onOpenSession={sessionId => openSession(sessionId, navigate)}
+            onOpenSession={sessionId => navigate(sessionRoute(sessionId))}
           />
         </Suspense>
       )}

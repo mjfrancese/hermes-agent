@@ -53,7 +53,6 @@ import { openNewWindow } from '@/store/windows'
 import { useTheme } from '@/themes/context'
 
 import { requestComposerFocus, requestVoiceToggle } from '../chat/composer/focus'
-import { openSession } from '../open-session'
 import {
   AGENTS_ROUTE,
   ARTIFACTS_ROUTE,
@@ -104,7 +103,7 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
 
   const goToSession = (sessionId: null | string) => {
     if (sessionId) {
-      openSession(sessionId, navigate)
+      navigate(sessionRoute(sessionId))
     }
   }
 

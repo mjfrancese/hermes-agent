@@ -4,7 +4,6 @@ import type * as React from 'react'
 import { ProfileTag } from '@/app/chat/profile-tag'
 import { startSessionDrag } from '@/app/chat/session-drag'
 import { PlatformAvatar } from '@/app/messaging/platform-icon'
-import { openSession } from '@/app/open-session'
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
 import { Tip } from '@/components/ui/tooltip'
@@ -15,7 +14,8 @@ import { triggerHaptic } from '@/lib/haptics'
 import { handoffOriginSource, sessionSourceLabel } from '@/lib/session-source'
 import { coarseElapsed } from '@/lib/time'
 import { cn } from '@/lib/utils'
-import { $attentionSessionIds } from '@/store/session-states'
+import { $attentionSessionIds, openSessionTile } from '@/store/session-states'
+import { canOpenSessionWindow, openSessionInNewWindow } from '@/store/windows'
 
 import { SessionStatusDot } from '../session-status-dot'
 
@@ -174,18 +174,18 @@ export function SidebarSessionRow({
               event.preventDefault()
               event.stopPropagation()
               triggerHaptic('selection')
-              openSession(session.id, () => undefined, 'tab')
+              openSessionTile(session.id, 'center')
             }
           }}
           onClick={event => {
             const mod = event.metaKey || event.ctrlKey
 
             // ⇧⌘-click → pop into its own window (needs standalone windows).
-            if (mod && event.shiftKey) {
+            if (mod && event.shiftKey && canOpenSessionWindow()) {
               event.preventDefault()
               event.stopPropagation()
               triggerHaptic('selection')
-              openSession(session.id, () => undefined, 'window')
+              void openSessionInNewWindow(session.id)
 
               return
             }
@@ -195,7 +195,7 @@ export function SidebarSessionRow({
               event.preventDefault()
               event.stopPropagation()
               triggerHaptic('selection')
-              openSession(session.id, () => undefined, 'tab')
+              openSessionTile(session.id, 'center')
 
               return
             }

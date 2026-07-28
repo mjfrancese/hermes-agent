@@ -114,11 +114,7 @@ export function ModelVisibilityDialog({
                           {name}
                           {tag ? <span className="text-(--ui-text-tertiary)"> {tag}</span> : null}
                         </span>
-                        <Switch
-                          checked={visible.has(key)}
-                          onCheckedChange={() => toggle(provider, family.id)}
-                          size="xs"
-                        />
+                        <Switch checked={visible.has(key)} onCheckedChange={() => toggle(provider, family.id)} />
                       </label>
                     )
                   })}
