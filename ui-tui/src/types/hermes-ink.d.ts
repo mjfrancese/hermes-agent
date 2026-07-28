@@ -167,11 +167,7 @@ declare module '@hermes/ink' {
     readonly write: (data: string) => boolean
   }
   export function useTerminalFocus(): boolean
-  export function useTerminalTitle(title: string | TerminalTitlePair | null): void
-  export interface TerminalTitlePair {
-    tab?: string
-    window?: string
-  }
+  export function useTerminalTitle(title: string | null): void
   export function useDeclaredCursor(args: {
     readonly line: number
     readonly column: number

@@ -443,11 +443,7 @@ def main():
     if not write_json({
         "jsonrpc": "2.0",
         "method": "event",
-        "params": {
-            "type": "gateway.ready",
-            # change_events: see tui_gateway/ws.py — clients demote legacy polls.
-            "payload": {"skin": resolve_skin(), "change_events": True},
-        },
+        "params": {"type": "gateway.ready", "payload": {"skin": resolve_skin()}},
     }):
         _log_exit("startup write failed (broken stdout pipe before first event)")
         sys.exit(0)

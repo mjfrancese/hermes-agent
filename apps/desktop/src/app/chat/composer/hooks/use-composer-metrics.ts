@@ -2,7 +2,6 @@ import { useAuiState } from '@assistant-ui/react'
 import { type RefObject, useCallback, useEffect, useRef, useState } from 'react'
 
 import {
-  chatSurfaceRoot,
   clearSurfaceVar,
   COMPOSER_HEIGHT_VAR,
   COMPOSER_SURFACE_HEIGHT_VAR,
@@ -14,7 +13,6 @@ import { useResizeObserver } from '@/hooks/use-resize-observer'
 import { COMPOSER_COMPACT_PILL_PX, COMPOSER_SINGLE_LINE_MAX_PX, COMPOSER_STACK_BREAKPOINT_PX } from '../composer-utils'
 
 interface UseComposerMetricsArgs {
-  composerDockRef: RefObject<HTMLDivElement | null>
   composerRef: RefObject<HTMLFormElement | null>
   composerSurfaceRef: RefObject<HTMLDivElement | null>
   editorRef: RefObject<HTMLDivElement | null>
@@ -29,13 +27,7 @@ interface UseComposerMetricsArgs {
  * tree's computed style, and `tight` only flips when it crosses the breakpoint.
  * Returns `stacked` (the only value the render needs).
  */
-export function useComposerMetrics({
-  composerDockRef,
-  composerRef,
-  composerSurfaceRef,
-  editorRef,
-  poppedOut
-}: UseComposerMetricsArgs): {
+export function useComposerMetrics({ composerRef, composerSurfaceRef, editorRef, poppedOut }: UseComposerMetricsArgs): {
   compactPill: boolean
   stacked: boolean
 } {
@@ -96,11 +88,8 @@ export function useComposerMetrics({
 
   const syncComposerMetrics = useCallback(() => {
     const composer = composerRef.current
-    // The dock is the full docked footprint — strips, status stack, composer —
-    // so it, not the composer alone, is what the thread has to clear.
-    const dock = composerDockRef.current
 
-    if (!composer || !dock) {
+    if (!composer) {
       return
     }
 
@@ -118,8 +107,7 @@ export function useComposerMetrics({
       return
     }
 
-    const { height } = dock.getBoundingClientRect()
-    const { width } = composer.getBoundingClientRect()
+    const { height, width } = composer.getBoundingClientRect()
     const surfaceHeight = composerSurfaceRef.current?.getBoundingClientRect().height
 
     if (width > 0) {
@@ -167,9 +155,9 @@ export function useComposerMetrics({
         setSurfaceVar(composer, COMPOSER_SURFACE_HEIGHT_VAR, `${bucket}px`)
       }
     }
-  }, [composerDockRef, composerRef, composerSurfaceRef, editorRef])
+  }, [composerRef, composerSurfaceRef, editorRef])
 
-  useResizeObserver(syncComposerMetrics, composerDockRef, composerRef, composerSurfaceRef, editorRef)
+  useResizeObserver(syncComposerMetrics, composerRef, composerSurfaceRef, editorRef)
 
   // Toggling pop-out changes whether the composer reserves thread clearance.
   // The ResizeObserver may not fire (the box can keep the same box size), so
@@ -180,14 +168,11 @@ export function useComposerMetrics({
   }, [poppedOut, syncComposerMetrics])
 
   useEffect(() => {
-    // Resolve the owning surface while the composer is still attached; the
-    // unmount cleanup runs after React detached the node, where closest() can
-    // no longer find [data-chat-surface].
-    const root = chatSurfaceRoot(composerRef.current)
+    const composer = composerRef.current
 
     return () => {
-      clearSurfaceVar(root, COMPOSER_HEIGHT_VAR)
-      clearSurfaceVar(root, COMPOSER_SURFACE_HEIGHT_VAR)
+      clearSurfaceVar(composer, COMPOSER_HEIGHT_VAR)
+      clearSurfaceVar(composer, COMPOSER_SURFACE_HEIGHT_VAR)
     }
   }, [composerRef])
 

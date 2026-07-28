@@ -21,7 +21,6 @@ import {
   findGroup,
   findGroupOfPane,
   groupLeafIds,
-  type GroupNode,
   insertAtGroup,
   isLayoutNode,
   type LayoutNode,
@@ -256,85 +255,25 @@ export function noteActiveTreeGroup(groupId: null | string) {
   }
 }
 
-/** The zone the pointer is currently over, or null off every zone. Transient —
- *  it only OVERRIDES the focused zone while the mouse actually sits in one, so
- *  moving the pointer away reverts the tab verbs to real focus rather than
- *  stranding them on whatever the mouse last brushed past. */
-export const $hoveredTreeGroup = atom<null | string>(null)
-
-/** Record the hovered zone (pointerover / pointer leaving the window). Idempotent. */
-export function noteHoveredTreeGroup(groupId: null | string) {
-  if (groupId !== $hoveredTreeGroup.get()) {
-    $hoveredTreeGroup.set(groupId)
-  }
-}
-
-/** The zone every keyboard tab verb acts on, as an ELIGIBILITY LADDER: the
- *  hovered zone, else the focused one, else the workspace's. Each rung must
- *  satisfy `eligible` to claim the keys, so a pointer parked somewhere that
- *  can't serve the verb — the sidebar, the titlebar, a single-pane rail —
- *  hands off to the next rung instead of swallowing the keystroke. Hover-first
- *  is what makes ⌘1…⌘9 land in the pane you're pointing at without clicking
- *  into it; the rungs below are why the keys still work when you're pointing
- *  at nothing. One resolver so the number keys, ⌃Tab, and the ⌘W / ⌘T family
- *  can never disagree about which zone is "the" zone. */
-function tabTargetGroup(eligible: (group: GroupNode) => boolean): GroupNode | null {
-  const tree = $layoutTree.get()
-
-  if (!tree) {
-    return null
-  }
-
-  for (const groupId of [$hoveredTreeGroup.get(), $activeTreeGroup.get()]) {
-    const group = groupId ? findGroup(tree, groupId) : null
-
-    if (group && eligible(group)) {
-      return group
-    }
-  }
-
-  const main = findGroupOfPane(tree, 'workspace')
-
-  return main && eligible(main) ? main : null
-}
-
-const treeGroupOfEvent = (event: Event): null | string => {
-  const el = event.target instanceof HTMLElement ? event.target : null
-
-  return el?.closest<HTMLElement>('[data-tree-group]')?.dataset.treeGroup ?? null
-}
-
-/** Install the zone trackers (call once from the tree root). Records the
+/** Install the active-zone tracker (call once from the tree root). Records the
  *  `[data-tree-group]` under each pointerdown / focusin so ⌘W knows which
- *  zone's tab to close even when nothing is DOM-focused, and the one under the
- *  pointer so the tab verbs follow the mouse. */
+ *  zone's tab to close even when nothing is DOM-focused. */
 export function trackActiveTreeGroup(): () => void {
-  const trackActive = (event: Event) => {
-    const groupId = treeGroupOfEvent(event)
+  const track = (event: Event) => {
+    const el = event.target instanceof HTMLElement ? event.target : null
+    const groupId = el?.closest<HTMLElement>('[data-tree-group]')?.dataset.treeGroup
 
     if (groupId) {
       noteActiveTreeGroup(groupId)
     }
   }
 
-  // `pointerover` fires on every element boundary crossing (not every mouse
-  // move), so leaving the panes for the titlebar reports null and the override
-  // lifts on its own.
-  const trackHover = (event: Event) => noteHoveredTreeGroup(treeGroupOfEvent(event))
-  const clearHover = () => noteHoveredTreeGroup(null)
-
-  window.addEventListener('pointerdown', trackActive, true)
-  window.addEventListener('focusin', trackActive, true)
-  window.addEventListener('pointerover', trackHover, true)
-  document.documentElement.addEventListener('pointerleave', clearHover)
-  window.addEventListener('blur', clearHover)
+  window.addEventListener('pointerdown', track, true)
+  window.addEventListener('focusin', track, true)
 
   return () => {
-    window.removeEventListener('pointerdown', trackActive, true)
-    window.removeEventListener('focusin', trackActive, true)
-    window.removeEventListener('pointerover', trackHover, true)
-    document.documentElement.removeEventListener('pointerleave', clearHover)
-    window.removeEventListener('blur', clearHover)
+    window.removeEventListener('pointerdown', track, true)
+    window.removeEventListener('focusin', track, true)
   }
 }
 
@@ -343,40 +282,12 @@ const isUncloseablePane = (paneId: string): boolean =>
     (registry.getArea('panes').find(c => c.id === paneId)?.data as { uncloseable?: boolean } | undefined)?.uncloseable
   )
 
-/** A pane that belongs to a CHAT tab strip — the workspace or a session tile. */
-export const isSessionStripPane = (paneId: string): boolean =>
-  paneId === 'workspace' || paneId.startsWith('session-tile:')
-
-/** The zone the session-tab verbs (⌘W / ⌘T / ⌘⇧T / the strip's "+") act on:
- *  the first of hovered / focused / workspace that hosts a chat strip. Same
- *  ladder ⌘1…⌘9 indexes, so the number keys and the tab verbs can't disagree
- *  about which strip is "the" strip. A target parked in the sidebar / terminal
- *  / files must NOT retarget them — those zones fall through to main rather
- *  than letting ⌘W close the file tree. */
-function focusedSessionGroup(): GroupNode | null {
-  return tabTargetGroup(group => group.panes.some(isSessionStripPane))
-}
-
-/** The pane a NEW session tab should dock beside (⌘T): the focused chat zone's
- *  active session pane, else its first. Null when no zone hosts a chat strip —
- *  the caller falls back to the workspace. */
-export function focusedSessionTabAnchor(): null | string {
-  const group = focusedSessionGroup()
-
-  if (!group) {
-    return null
-  }
-
-  const active = group.active
-
-  return active && isSessionStripPane(active) ? active : (group.panes.find(isSessionStripPane) ?? null)
-}
-
-/** ⌘W: close the FOCUSED chat zone's active tab, unless it's the uncloseable
- *  workspace itself. Returns false when there's nothing to close, so ⌘W stays a
- *  no-op — it never closes the window. */
-export function closeFocusedSessionTab(): boolean {
-  const active = focusedSessionGroup()?.active
+/** ⌘W "main tabs always": close the MAIN (workspace) zone's active tab, unless
+ *  it's the uncloseable workspace itself. Returns false when there's nothing to
+ *  close, so ⌘W stays a no-op — it never closes the window. */
+export function closeWorkspaceTab(): boolean {
+  const tree = $layoutTree.get()
+  const active = tree ? findGroupOfPane(tree, 'workspace')?.active : null
 
   if (!active || isUncloseablePane(active)) {
     return false
@@ -477,53 +388,50 @@ function shownPanesInGroup(group: { panes: readonly string[] }): string[] {
   })
 }
 
-/** ⌘1…⌘9: activate the Nth *visible* tab of the target zone — the first of
- *  hovered / focused / workspace that is a real tab strip (≥2 shown panes).
- *  Pointing at the sidebar (or nothing) therefore still switches main's tabs
- *  instead of dead-ending. Returns false so the caller falls back to its
- *  default (profile switch) when no zone qualifies. */
+/** ⌘1…⌘9: activate the Nth *visible* tab of the FOCUSED zone (the interaction
+ *  tracker's group), but only when it's a real tab strip (≥2 shown panes).
+ *  Returns false so the caller falls back to its default (profile switch) —
+ *  the number keys mean "switch tab" only while a multi-tab zone holds focus. */
 export function activateTreeTabSlot(slot: number): boolean {
-  const group = tabTargetGroup(candidate => shownPanesInGroup(candidate).length >= 2)
+  const groupId = $activeTreeGroup.get()
+  const tree = $layoutTree.get()
+  const group = groupId && tree ? findGroup(tree, groupId) : null
   const panes = group ? shownPanesInGroup(group) : []
 
-  if (!group || slot < 1 || slot > panes.length) {
+  if (panes.length < 2 || slot < 1 || slot > panes.length) {
     return false
   }
 
-  activateTreePane(group.id, panes[slot - 1])
+  activateTreePane(groupId!, panes[slot - 1])
 
   return true
 }
 
-/** ⌃Tab / ⌃⇧Tab: cycle the target zone's *visible* tabs (wrapping) — the first
- *  of hovered / focused / workspace that is a chat strip with ≥2 shown tabs.
- *  Returns false so the caller falls back to the recent-session switcher when
- *  no zone qualifies. */
+/** ⌃Tab / ⌃⇧Tab: cycle the FOCUSED zone's *visible* tabs (wrapping) — but only a
+ *  session/main strip with ≥2 shown tabs. Returns false so the caller falls
+ *  back to the recent-session switcher when the focus isn't a chat tab strip. */
 export function cycleTreeTabInFocusedZone(direction: 1 | -1): boolean {
-  const group = tabTargetGroup(candidate => {
-    const shown = shownPanesInGroup(candidate)
+  const groupId = $activeTreeGroup.get()
+  const tree = $layoutTree.get()
+  const group = groupId && tree ? findGroup(tree, groupId) : null
+  const panes = group ? shownPanesInGroup(group) : []
 
-    return shown.length >= 2 && shown.some(isSessionStripPane)
-  })
-
-  if (!group) {
+  if (panes.length < 2 || !panes.some(id => id === 'workspace' || id.startsWith('session-tile:'))) {
     return false
   }
 
-  const panes = shownPanesInGroup(group)
-
   // Active may itself be hidden (Files collapsed mid-cycle) — treat it as
   // missing so the step starts from a real chip rather than landing on a ghost.
-  const current = Math.max(0, panes.indexOf(group.active ?? ''))
-  const idx = panes.includes(group.active ?? '') ? current : 0
+  const current = Math.max(0, panes.indexOf(group!.active ?? ''))
+  const idx = panes.includes(group!.active ?? '') ? current : 0
   const nextId = panes[(idx + direction + panes.length) % panes.length]
-  activateTreePane(group.id, nextId)
+  activateTreePane(group!.id, nextId)
 
   // Cycling onto a session/main tab must surface the name card — a zone that
   // was double-tap-hidden stays headerless otherwise ("the one that cycles
   // never gets it").
-  if (isSessionStripPane(nextId)) {
-    setTreeGroupHeaderHidden(group.id, false)
+  if (nextId === 'workspace' || nextId.startsWith('session-tile:')) {
+    setTreeGroupHeaderHidden(group!.id, false)
   }
 
   return true

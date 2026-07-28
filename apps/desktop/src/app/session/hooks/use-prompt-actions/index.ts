@@ -25,7 +25,6 @@ import { clearAllPrompts } from '@/store/prompts'
 import {
   $busy,
   $connection,
-  $currentCwd,
   $messages,
   setAwaitingResponse,
   setBusy,
@@ -77,38 +76,26 @@ interface HandoffResult {
   error?: string
 }
 
-const WINDOWS_ABSOLUTE_PATH_RE = /^(?:[A-Za-z]:[\\/]|\\\\)/
-const POSIX_ABSOLUTE_PATH_RE = /^\/(?!\/)/
-
-// `mode: local` means the gateway was launched locally, not necessarily that
-// Electron and the gateway share a filesystem. Windows Desktop can front a
-// WSL/Docker backend whose cwd is POSIX, so a Windows host path must cross the
-// boundary as bytes just like a remote attachment.
-function attachmentPathNeedsUpload(path: string, backendCwd?: null | string): boolean {
-  return WINDOWS_ABSOLUTE_PATH_RE.test(path.trim()) && POSIX_ABSOLUTE_PATH_RE.test(backendCwd?.trim() || '')
-}
-
 /**
  * Stage one file/image attachment into the session workspace and return the
- * attachment rewritten with the gateway-side ref. Attachments upload their
- * bytes for remote gateways and local cross-filesystem backends; otherwise the
- * gateway receives the shared local path. Throws on failure so callers can
- * surface an error. Shared by submit-time sync, the eager drop-time upload, and
- * the message-edit composer drop — keep them in lockstep.
+ * attachment rewritten with the gateway-side ref. Images upload their bytes in
+ * remote mode (so vision works) and pass the path locally; non-image files
+ * upload bytes remotely and pass the path locally. Throws on failure so callers
+ * can surface an error. Shared by submit-time sync, the eager drop-time upload,
+ * and the message-edit composer drop — keep them in lockstep.
  */
 export async function uploadComposerAttachment(
   attachment: ComposerAttachment,
-  opts: { backendCwd?: null | string; remote: boolean; requestGateway: GatewayRequest; sessionId: string }
+  opts: { remote: boolean; requestGateway: GatewayRequest; sessionId: string }
 ): Promise<ComposerAttachment> {
-  const { backendCwd, remote, requestGateway, sessionId } = opts
+  const { remote, requestGateway, sessionId } = opts
   const path = attachment.path ?? ''
   const label = attachment.label || pathLabel(path)
-  const uploadBytes = remote || attachmentPathNeedsUpload(path, backendCwd)
 
   if (attachment.kind === 'image') {
     let result: ImageAttachResponse
 
-    if (uploadBytes) {
+    if (remote) {
       let payload: Awaited<ReturnType<typeof readImageForRemoteAttach>>
 
       try {
@@ -151,7 +138,7 @@ export async function uploadComposerAttachment(
   // Non-image file.
   let dataUrl: string | null = null
 
-  if (uploadBytes) {
+  if (remote) {
     try {
       dataUrl = await readFileDataUrlForAttach(path)
     } catch (err) {
@@ -330,12 +317,7 @@ export function usePromptActions({
         }
 
         if (attachment.kind === 'image' || attachment.kind === 'file') {
-          const nextAttachment = await uploadComposerAttachment(attachment, {
-            backendCwd: $currentCwd.get(),
-            remote,
-            requestGateway,
-            sessionId
-          })
+          const nextAttachment = await uploadComposerAttachment(attachment, { remote, requestGateway, sessionId })
 
           // Update-only: never resurrect a chip the user removed mid-upload.
           if (updateComposerAttachments) {
@@ -374,14 +356,7 @@ export function usePromptActions({
       try {
         // Update-only: if the user removed the chip while this was uploading,
         // don't resurrect it — just drop the staged result on the floor.
-        updateComposerAttachment(
-          await uploadComposerAttachment(attachment, {
-            backendCwd: $currentCwd.get(),
-            remote,
-            requestGateway,
-            sessionId
-          })
-        )
+        updateComposerAttachment(await uploadComposerAttachment(attachment, { remote, requestGateway, sessionId }))
       } catch (err) {
         // Leave the chip in place so submit-time sync can retry (or the user can
         // remove it) and flag the card; also toast so a hard failure (unreadable

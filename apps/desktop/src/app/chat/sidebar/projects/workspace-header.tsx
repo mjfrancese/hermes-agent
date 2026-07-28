@@ -24,9 +24,7 @@ function LaneLabel({ label, title }: { label: string; title?: string }) {
   const tail = label.slice(label.length - tailLen)
 
   return (
-    // overflow-hidden: the pinned tail is shrink-0, so at extreme narrow widths
-    // it must clip inside the label rather than push the trailing icons out.
-    <span className="flex min-w-0 overflow-hidden" title={title}>
+    <span className="flex min-w-0" title={title}>
       <span className="truncate">{head}</span>
       <span className="shrink-0 whitespace-pre">{tail}</span>
     </span>

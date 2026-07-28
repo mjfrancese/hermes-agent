@@ -19,12 +19,10 @@ import {
   focusComposerInput,
   markActiveComposer,
   onComposerFocusRequest,
-  onComposerInsertRequest,
-  releaseActiveComposer
+  onComposerInsertRequest
 } from '@/app/chat/composer/focus'
 import { useAtCompletions } from '@/app/chat/composer/hooks/use-at-completions'
 import { useComposerUndo } from '@/app/chat/composer/hooks/use-composer-undo'
-import { useEmojiCompletions } from '@/app/chat/composer/hooks/use-emoji-completions'
 import { useSlashCompletions } from '@/app/chat/composer/hooks/use-slash-completions'
 import {
   dragHasAttachments,
@@ -39,7 +37,6 @@ import {
   placeCaretEnd,
   refChipElement,
   renderComposerContents,
-  replaceBeforeCaret,
   RICH_INPUT_SLOT
 } from '@/app/chat/composer/rich-editor'
 import { detectTrigger, textBeforeCaret, type TriggerState } from '@/app/chat/composer/text-utils'
@@ -113,19 +110,8 @@ export const UserEditComposer: FC<UserEditComposerProps> = ({ cwd, gateway, sess
   const canSubmit = draft.trim().length > 0
   const at = useAtCompletions({ cwd, gateway, sessionId })
   const slash = useSlashCompletions({ gateway })
-  const emoji = useEmojiCompletions()
 
-  // This is the one composer that routinely unmounts, so it is where the focus
-  // bus leaks: confirming or cancelling an edit tears the composer down while
-  // `'edit'` is still the active target. Release it alongside the thread-scroll
-  // cleanup so keyboard routing falls back to the visible chat composer.
-  useEffect(
-    () => () => {
-      notifyThreadEditClose()
-      releaseActiveComposer('edit')
-    },
-    []
-  )
+  useEffect(() => () => notifyThreadEditClose(), [])
 
   const focusEditor = useCallback(() => {
     const editor = editorRef.current
@@ -168,7 +154,7 @@ export const UserEditComposer: FC<UserEditComposerProps> = ({ cwd, gateway, sess
       const editor = editorRef.current
 
       if (editor) {
-        renderComposerContents(editor, next, { trailingCommitted: true })
+        renderComposerContents(editor, next)
         placeCaretEnd(editor)
       }
 
@@ -187,11 +173,7 @@ export const UserEditComposer: FC<UserEditComposerProps> = ({ cwd, gateway, sess
       editor &&
       (editor.childNodes.length === 0 || (document.activeElement !== editor && composerPlainText(editor) !== draft))
     ) {
-      // Inert by construction — this repaints on mount or when the editor
-      // isn't the one being typed into. A message opened for edit is finished
-      // text, so a `/command` ending it is committed and chips, matching how
-      // the transcript rendered that same message a moment ago.
-      renderComposerContents(editor, draft, { trailingCommitted: true })
+      renderComposerContents(editor, draft)
 
       if (document.activeElement === editor) {
         placeCaretEnd(editor)
@@ -288,13 +270,7 @@ export const UserEditComposer: FC<UserEditComposerProps> = ({ cwd, gateway, sess
   }, [])
 
   const triggerAdapter: Unstable_TriggerAdapter | null =
-    trigger?.kind === '@'
-      ? at.adapter
-      : trigger?.kind === '/'
-        ? slash.adapter
-        : trigger?.kind === ':'
-          ? emoji.adapter
-          : null
+    trigger?.kind === '@' ? at.adapter : trigger?.kind === '/' ? slash.adapter : null
 
   useEffect(() => {
     if (!trigger || !triggerAdapter?.search) {
@@ -310,14 +286,7 @@ export const UserEditComposer: FC<UserEditComposerProps> = ({ cwd, gateway, sess
     setTriggerActive(idx => Math.min(idx, Math.max(0, triggerItems.length - 1)))
   }, [triggerItems.length])
 
-  const triggerLoading =
-    trigger?.kind === '@'
-      ? at.loading
-      : trigger?.kind === '/'
-        ? slash.loading
-        : trigger?.kind === ':'
-          ? emoji.loading
-          : false
+  const triggerLoading = trigger?.kind === '@' ? at.loading : trigger?.kind === '/' ? slash.loading : false
 
   const replaceTriggerWithChip = useCallback(
     (item: Unstable_TriggerItem) => {
@@ -341,22 +310,41 @@ export const UserEditComposer: FC<UserEditComposerProps> = ({ cwd, gateway, sess
         starter ? window.setTimeout(refreshTrigger, 0) : closeTrigger()
       }
 
-      // In place first, spanning Chromium's split text nodes (see
-      // rangeBeforeCaret). The re-render fallback only runs when the caret
-      // genuinely can't anchor the token — it rebuilds from serialized text,
-      // which re-chips `@` refs but resets the caret to the end.
-      const fragment = document.createDocumentFragment()
+      const sel = window.getSelection()
+      const range = sel?.rangeCount ? sel.getRangeAt(0) : null
+      const node = range?.startContainer
+      const offset = range?.startOffset ?? 0
 
-      directive
-        ? fragment.append(refChipElement(directive[1], directive[2]), document.createTextNode(' '))
-        : fragment.append(document.createTextNode(text))
-
-      if (!replaceBeforeCaret(editor, trigger.tokenLength, fragment)) {
+      if (!sel || !range || node?.nodeType !== Node.TEXT_NODE || offset < trigger.tokenLength) {
         const current = composerPlainText(editor)
         renderComposerContents(editor, `${current.slice(0, Math.max(0, current.length - trigger.tokenLength))}${text}`)
         placeCaretEnd(editor)
+
+        return finish()
       }
 
+      const replaceRange = document.createRange()
+      replaceRange.setStart(node, offset - trigger.tokenLength)
+      replaceRange.setEnd(node, offset)
+      replaceRange.deleteContents()
+
+      if (directive) {
+        const chip = refChipElement(directive[1], directive[2])
+        const space = document.createTextNode(' ')
+        const fragment = document.createDocumentFragment()
+        fragment.append(chip, space)
+        replaceRange.insertNode(fragment)
+
+        const caret = document.createRange()
+        caret.setStart(space, 1)
+        caret.collapse(true)
+        sel.removeAllRanges()
+        sel.addRange(caret)
+
+        return finish()
+      }
+
+      document.execCommand('insertText', false, text)
       finish()
     },
     [aui, closeTrigger, recordUndoPoint, refreshTrigger, rememberInitialDraft, requestEditFocus, trigger]
@@ -427,7 +415,7 @@ export const UserEditComposer: FC<UserEditComposerProps> = ({ cwd, gateway, sess
         try {
           const uploaded = await uploadComposerAttachment(
             { detail: path, id: attachmentId(kind, path), kind, label: pathLabel(path), path },
-            { backendCwd: cwd, remote, requestGateway, sessionId }
+            { remote, requestGateway, sessionId }
           )
 
           const ref = attachmentDisplayText(uploaded)

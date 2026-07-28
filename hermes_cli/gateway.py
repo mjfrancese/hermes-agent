@@ -359,9 +359,7 @@ def _scan_gateway_pids(
         looks_like_gateway_runtime_command_line,
     )
     current_home = str(get_hermes_home().resolve())
-    # Forward slashes on both sides of the HERMES_HOME= match — see
-    # gateway.status._command_line_belongs_to_profile, which this mirrors.
-    current_home_lc = current_home.lower().replace("\\", "/")
+    current_home_lc = current_home.lower()
     current_profile_arg = _profile_arg(current_home)
     current_profile_name = (
         current_profile_arg.split()[-1] if current_profile_arg else ""
@@ -369,7 +367,7 @@ def _scan_gateway_pids(
     current_profile_name_lc = current_profile_name.lower()
 
     def _matches_current_profile(command: str) -> bool:
-        command_lc = command.lower().replace("\\", "/")
+        command_lc = command.lower()
         if current_profile_name:
             return (
                 f"--profile {current_profile_name_lc}" in command_lc
@@ -410,6 +408,7 @@ def _scan_gateway_pids(
 
             _no_window = {"creationflags": windows_hide_flags()}
             wmic_path = shutil.which("wmic")
+            used_fallback = False
             result = None
             if wmic_path is not None:
                 try:
@@ -456,6 +455,7 @@ def _scan_gateway_pids(
                     )
                 except (OSError, subprocess.TimeoutExpired):
                     return []
+                used_fallback = True
             if result.returncode != 0 or result.stdout is None:
                 return []
             current_cmd = ""
@@ -4683,11 +4683,8 @@ def _guard_named_profile_under_multiplexer(force: bool = False) -> None:
             cfg_path = default_root / "config.yaml"
             if not cfg_path.exists():
                 return
-            # Raw read of the DEFAULT root's config (not the active profile
-            # home, so load_config() is the wrong owner here); whole probe is
-            # fail-open via the enclosing except.
-            from hermes_cli.config import read_user_config_raw
-            cfg = read_user_config_raw(cfg_path)
+            with open(cfg_path, encoding="utf-8") as f:
+                cfg = _yaml.safe_load(f) or {}
             multiplex = bool(
                 cfg.get("multiplex_profiles")
                 or (cfg.get("gateway", {}) or {}).get("multiplex_profiles")
