@@ -239,7 +239,7 @@ export function ExternalLink({
 
   return (
     <a
-      className={cn('ref', className)}
+      className={cn('link-chip', className)}
       href={target}
       onClick={event => {
         event.stopPropagation()

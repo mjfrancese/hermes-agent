@@ -1,20 +1,28 @@
 import { ActionBarPrimitive, BranchPickerPrimitive, MessagePrimitive, useAuiState } from '@assistant-ui/react'
+import { useStore } from '@nanostores/react'
 import { type FC, type ReactNode, useCallback, useRef, useState } from 'react'
 
 import { DirectiveContent } from '@/components/assistant-ui/directive-text'
 import { messageAttachmentRefs, messageContentText } from '@/components/assistant-ui/thread/content'
 import { ReactionBadge, ReactionPicker } from '@/components/assistant-ui/thread/message-reactions'
 import { type RestoreMessageTarget } from '@/components/assistant-ui/thread/types'
-import { useMessageReactions } from '@/components/assistant-ui/thread/use-message-reactions'
 import { UserMessageText } from '@/components/assistant-ui/thread/user-message-text'
 import { Codicon } from '@/components/ui/codicon'
 import { useResizeObserver } from '@/hooks/use-resize-observer'
 import { useI18n } from '@/i18n'
+import type { ChatMessage } from '@/lib/chat-messages'
 import { triggerHaptic } from '@/lib/haptics'
 import { StopFilled } from '@/lib/icons'
 import { cn } from '@/lib/utils'
+import { toggleMessageReaction } from '@/store/reactions'
+import { $reactionsEnabled } from '@/store/reactions-enabled'
+import { $agentReactions, $localReactions, mergeReactions, setLocalReaction } from '@/store/reactions-local'
 import { notifyThreadEditOpen } from '@/store/thread-scroll'
 import { isWatchWindow } from '@/store/windows'
+import type { MessageReaction } from '@/types/hermes'
+
+// Stable empty identity — a fresh [] per render would re-run every consumer.
+const EMPTY_REACTIONS: MessageReaction[] = []
 
 export function StickyHumanMessageContainer({
   attachments,
@@ -146,15 +154,38 @@ export const UserMessage: FC<{
     return messageAttachmentRefs(custom.attachmentRefs)
   })
 
-  const [pickerOpen, setPickerOpen] = useState(false)
-  const { enabled: reactionsEnabled, react, reactions: shownReactions } = useMessageReactions(messageId, 'user')
+  const reactions = useAuiState(s => {
+    const custom = (s.message.metadata?.custom ?? {}) as { reactions?: MessageReaction[] }
 
-  const pickEmoji = useCallback(
+    return custom.reactions ?? EMPTY_REACTIONS
+  })
+
+  const rowId = useAuiState(s => {
+    const custom = (s.message.metadata?.custom ?? {}) as { rowId?: number }
+
+    return custom.rowId
+  })
+
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const reactionsEnabled = useStore($reactionsEnabled)
+  const localAll = useStore($localReactions)
+  const agentLive = useStore($agentReactions)
+
+  const shownReactions = mergeReactions(
+    reactions,
+    localAll[messageId],
+    rowId !== undefined ? agentLive[rowId] : undefined
+  )
+
+  const react = useCallback(
     (emoji: null | string) => {
       setPickerOpen(false)
-      react(emoji)
+      // Flip the UI immediately — a tapback is direct manipulation and must
+      // never wait on a round-trip. Persistence follows in the background.
+      setLocalReaction(messageId, emoji)
+      void toggleMessageReaction({ id: messageId, role: 'user', rowId, reactions } as ChatMessage, emoji)
     },
-    [react]
+    [messageId, reactions, rowId]
   )
 
   // Sticky human bubbles clamp to ~2 lines with a soft fade so a long prompt
@@ -272,7 +303,7 @@ export const UserMessage: FC<{
           <div className="human-message-with-todos-wrapper flex w-full flex-col gap-0">
             <ReactionPicker
               onOpenChange={setPickerOpen}
-              onSelect={pickEmoji}
+              onSelect={react}
               open={pickerOpen}
               selected={shownReactions.find(reaction => reaction.author === 'user')?.emoji}
             >

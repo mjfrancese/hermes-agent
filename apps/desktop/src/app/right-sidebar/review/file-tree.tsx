@@ -26,11 +26,9 @@ import {
   $reviewFiles,
   $reviewLoading,
   $reviewOpen,
-  $reviewScopeCwd,
   $reviewSelectedPath,
   $reviewTreeMode,
   requestRevert,
-  reviewRepoCwd,
   selectReviewFile,
   stageReviewFile,
   unstageReviewFile
@@ -56,13 +54,16 @@ const STATUS_GLYPH: Record<string, { icon: string; tone: string }> = {
 }
 
 // Review paths are repo-relative; the composer drop expects absolute paths, so
-// join against the pane's repo (its pinned scope, else the active session cwd).
+// join against the active session cwd (the repo we probed).
 function absolutePath(relative: string): string {
   if (/^([a-zA-Z]:[\\/]|\/)/.test(relative)) {
     return relative
   }
 
-  const cwd = reviewRepoCwd()?.replace(/[\\/]+$/, '')
+  const cwd = $currentCwd
+    .get()
+    ?.trim()
+    .replace(/[\\/]+$/, '')
 
   return cwd ? `${cwd}/${relative}` : relative
 }
@@ -236,11 +237,7 @@ function ReviewFileRow({ node, depth }: { node: ReviewTreeNode; depth: number })
   const selected = file.path === selectedPath
   const glyph = STATUS_GLYPH[file.status] ?? STATUS_GLYPH.M
   const dragPath = absolutePath(file.path)
-  // Reactive mirror of reviewRepoCwd(): the pinned scope wins, else the
-  // active session's cwd (subscribing to both keeps the row live either way).
-  const scopeCwd = useStore($reviewScopeCwd)
-  const activeCwd = useStore($currentCwd)
-  const cwd = scopeCwd?.trim() || activeCwd
+  const cwd = useStore($currentCwd)
 
   // Single-click shows the inline diff; double-click opens the file in the main
   // preview pane (matching the file browser). They're mutually exclusive: defer

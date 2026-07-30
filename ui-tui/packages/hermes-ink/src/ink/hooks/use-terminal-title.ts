@@ -29,15 +29,13 @@ export function useTerminalTitle(title: string | TerminalTitlePair | null): void
     }
 
     if (process.platform === 'win32') {
-      const clean = stripAnsi(typeof title === 'string' ? title : (title.window ?? title.tab ?? ''))
+      const clean = stripAnsi(typeof title === 'string' ? title : title.window ?? title.tab ?? '')
       process.title = clean
-
       return
     }
 
     if (typeof title === 'string') {
       writeRaw(osc(OSC.SET_TITLE_AND_ICON, stripAnsi(title)))
-
       return
     }
 
@@ -45,7 +43,6 @@ export function useTerminalTitle(title: string | TerminalTitlePair | null): void
     // show the short session name instead of a truncated tail.
     const tab = stripAnsi(title.tab ?? '')
     const window = stripAnsi(title.window ?? '')
-
     if (tab && window) {
       writeRaw(osc(OSC.SET_ICON, tab) + osc(OSC.SET_TITLE, window))
     } else if (window) {

@@ -1,5 +1,6 @@
 import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
+import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal } from '@xterm/xterm'
 import { useEffect, useRef } from 'react'
@@ -11,7 +12,6 @@ import { useTheme } from '@/themes/context'
 import { registerAgentTerminalWriter } from './agent-terminal-stream'
 import { makeTerminalReader, registerTerminalReader } from './buffer'
 import { mirrorSelection, terminalClipboardIntent } from './clipboard'
-import { terminalLinkHandler, terminalWebLinksAddon } from './links'
 import { isMacPlatform, resolveSurfaceColor, terminalTheme } from './selection'
 
 // Read-only terminal for an agent background process: a write-only xterm (no PTY,
@@ -51,7 +51,6 @@ export function useAgentTerminal({ active, id, procId }: { active: boolean; id: 
       fontWeightBold: 'bold',
       letterSpacing: 0,
       lineHeight: 1.12,
-      linkHandler: terminalLinkHandler,
       minimumContrastRatio: 4.5,
       scrollback: 1000,
       theme: surfaceTheme()
@@ -60,7 +59,7 @@ export function useAgentTerminal({ active, id, procId }: { active: boolean; id: 
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.loadAddon(new Unicode11Addon())
-    term.loadAddon(terminalWebLinksAddon())
+    term.loadAddon(new WebLinksAddon())
     term.unicode.activeVersion = '11'
     term.open(host)
     termRef.current = term

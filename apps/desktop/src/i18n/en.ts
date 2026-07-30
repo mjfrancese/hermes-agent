@@ -770,7 +770,7 @@ export const en: Translations = {
       disableServer: name => `Disable ${name}`,
       serverEnabled: name => `${name} enabled — applies to new sessions.`,
       serverDisabled: name => `${name} disabled — applies to new sessions.`,
-      toggleFailed: (name, enabled) => `Failed to turn ${name} ${enabled ? 'on' : 'off'}`,
+      toggleFailed: name => `Failed to toggle ${name}`,
       tabServers: 'Servers',
       tabCatalog: 'Catalog',
       catalogLoading: 'Loading MCP catalog...',
@@ -996,7 +996,7 @@ export const en: Translations = {
     visionModelLink: 'Choose vision model in Settings → Models',
     toolsetsEnabled: (enabled, total) => `${enabled}/${total} toolsets enabled`,
     configureToolset: label => `Configure ${label}`,
-    toggleToolset: (label, enabled) => `Turn ${label} toolset ${enabled ? 'on' : 'off'}`,
+    toggleToolset: label => `Toggle ${label} toolset`,
     skillsLoadFailed: 'Skills failed to load',
     toolsetsRefreshFailed: 'Toolsets failed to refresh',
     skillEnabled: 'Skill enabled',
@@ -1169,7 +1169,7 @@ export const en: Translations = {
       installed: 'Installed',
       generatedTag: 'Generated',
       adoptFailed: 'Could not adopt that pet.',
-      toggleFailed: enabled => `Could not turn the pet ${enabled ? 'on' : 'off'}.`,
+      toggleFailed: 'Could not toggle the pet.',
       noneAvailable: 'No pets available — pick one below to install.'
     },
     generatePet: {
@@ -1499,7 +1499,7 @@ export const en: Translations = {
     deleteDescPrefix: 'This will permanently remove ',
     deleteDescSuffix: '. This cannot be undone.',
     deleteFailed: (name: string) => `Failed to delete "${name}"`,
-    toggleFailed: (name, enabled) => `Failed to turn "${name}" ${enabled ? 'on' : 'off'}`,
+    toggleFailed: (name: string) => `Failed to update "${name}"`,
     newSubscription: 'New subscription',
     restarting: 'Gateway restarting...',
     restartNeeded: 'Webhooks are enabled, but the gateway still needs a restart before the receiver can come online.',
@@ -1897,7 +1897,7 @@ export const en: Translations = {
       forceRemove: 'Force remove',
       enter: label => `Open ${label}`,
       reorder: label => `Reorder ${label}`,
-      toggle: (label, open) => `${open ? 'Show' : 'Hide'} ${label} sessions`,
+      toggle: label => `Toggle ${label} sessions`,
       back: 'All projects'
     },
     newSessionIn: label => `New session in ${label}`,
@@ -2657,11 +2657,17 @@ export const en: Translations = {
     closeToRight: 'Close to the right',
     closeAll: 'Close all',
     newSessionTab: 'New session tab',
+    split: dir => `Split ${dir}`,
+    move: dir => `Move ${dir}`,
+    dirUp: 'up',
+    dirDown: 'down',
+    dirLeft: 'left',
+    dirRight: 'right',
     pluginDisabled: pluginId => `Plugin "${pluginId}" disabled`,
     pluginDisabledBody: 'Re-enable it in Settings → Plugins to bring the pane back.',
     missingPane: paneId => `missing pane: ${paneId}`,
     editTitle: 'Layouts',
-    editHint: 'Pick a layout, or drag panes between zones.',
+    editHint: 'Pick a layout, or drag panes between zones. Right-click a zone to split.',
     reset: 'Reset',
     templates: 'Templates',
     custom: 'Custom',
@@ -2706,8 +2712,6 @@ export const en: Translations = {
       branchNewChat: 'Branch in new chat',
       react: 'React',
       dismissError: 'Dismiss error',
-      filesChanged: count => (count === 1 ? '1 file changed' : `${count} files changed`),
-      reviewChanges: 'Review',
       readAloudFailed: 'Read aloud failed',
       preparingAudio: 'Preparing audio...',
       stopReading: 'Stop reading',
@@ -2951,7 +2955,7 @@ export const en: Translations = {
     sidebar: {
       title: 'Sidebar',
       description: 'Displays the mobile sidebar.',
-      toggle: open => `${open ? 'Show' : 'Hide'} sidebar`
+      toggle: 'Toggle Sidebar'
     }
   }
 }

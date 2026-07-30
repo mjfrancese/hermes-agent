@@ -5,7 +5,6 @@ import { useEffect, useMemo } from 'react'
 
 import { useSessionView } from '@/app/chat/session-view'
 import { CodeCardIcon } from '@/components/chat/code-card'
-import { WIDGET_SHELL_CLASS } from '@/components/chat/widget-shell'
 import { useI18n } from '@/i18n'
 import type { ArtifactDetection } from '@/lib/artifact-detect'
 import { codiconForLanguage } from '@/lib/markdown-code'
@@ -97,9 +96,8 @@ export function ArtifactCard({ code, detection, streaming = false }: ArtifactCar
   return (
     <button
       className={cn(
-        WIDGET_SHELL_CLASS,
-        'group/artifact my-1.5 flex w-full max-w-md items-center gap-2.5 overflow-hidden text-left',
-        streaming ? 'cursor-default' : 'cursor-pointer'
+        'group/artifact my-1.5 flex w-full max-w-md items-center gap-2.5 overflow-hidden rounded-[0.625rem] border border-border px-3 py-2.5 text-left transition-colors',
+        streaming ? 'cursor-default' : 'cursor-pointer hover:bg-accent/40'
       )}
       data-slot="aui_artifact-card"
       disabled={streaming}

@@ -2,7 +2,6 @@ import { useAui, useAuiState, useComposerRuntime } from '@assistant-ui/react'
 import { type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import { SLASH_COMMAND_RE } from '@/lib/chat-runtime'
-import { sanitizeComposerInput } from '@/lib/composer-input-sanitize'
 import { type ComposerAttachment, stashSessionDraft, takeSessionDraft } from '@/store/composer'
 import { isBrowsingHistory } from '@/store/composer-input-history'
 
@@ -22,13 +21,7 @@ import {
   releaseActiveComposer
 } from '../focus'
 import { type InlineRefInput, insertInlineRefsIntoEditor } from '../inline-refs'
-import {
-  composerPlainText,
-  normalizeComposerEditorDom,
-  placeCaretEnd,
-  REF_RE,
-  renderComposerContents
-} from '../rich-editor'
+import { composerPlainText, placeCaretEnd, REF_RE, renderComposerContents } from '../rich-editor'
 import { useComposerScope } from '../scope'
 import type { ChatBarProps } from '../types'
 
@@ -244,13 +237,7 @@ export function useComposerDraft({
       return draftRef.current
     }
 
-    // Same normalize-then-sanitize the rAF flush does. An emptied editor still
-    // holds the placeholder <br> that keeps the contenteditable from collapsing
-    // to a sliver, and that serializes as "\n" — so an editor the user just
-    // cleared would otherwise stash a one-newline draft and come back non-empty.
-    normalizeComposerEditorDom(editor)
-
-    const text = sanitizeComposerInput(composerPlainText(editor))
+    const text = composerPlainText(editor)
 
     if (text !== draftRef.current) {
       draftRef.current = text
