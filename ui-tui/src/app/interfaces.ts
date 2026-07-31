@@ -12,7 +12,6 @@ import type {
   SubscriptionStateResponse,
   SubscriptionUpgradeResponse
 } from '../gatewayTypes.js'
-import type { QueueItem } from '../hooks/useQueue.js'
 import type { ParsedVoiceRecordKey } from '../lib/platform.js'
 import type { RpcResult } from '../lib/rpc.js'
 import type { ActiveWidget } from '../sdk/types.js'
@@ -370,19 +369,19 @@ export interface ComposerActions {
   attachImagePath: (path: string) => void
   clearIn: () => void
   dequeue: () => string | undefined
-  enqueue: (text: string, display?: string) => void
+  enqueue: (text: string) => void
   handleTextPaste: (event: PasteEvent) => MaybePromise<ComposerPasteResult | null>
   openEditor: () => Promise<void>
-  prependQueue: (item: QueueItem) => void
   pushHistory: (text: string) => void
   removeQueue: (index: number) => void
+  replaceQueue: (index: number, text: string) => void
   setCompIdx: StateSetter<number>
   setComposerTokens: StateSetter<ComposerToken[]>
   setHistoryIdx: StateSetter<null | number>
   setInput: StateSetter<string>
   setInputBuf: StateSetter<string[]>
   setQueueEdit: (index: null | number) => void
-  takeQueue: (index: number, editedDisplay?: string) => QueueItem | undefined
+  syncQueue: () => void
   /** Reconcile attached payloads against tokens still present in the text. */
   syncTokens: (value: string) => void
 }
@@ -391,7 +390,7 @@ export interface ComposerRefs {
   historyDraftRef: MutableRefObject<string>
   historyRef: MutableRefObject<string[]>
   queueEditRef: MutableRefObject<null | number>
-  queueRef: MutableRefObject<QueueItem[]>
+  queueRef: MutableRefObject<string[]>
   submitRef: MutableRefObject<(value: string) => void>
   tokensRef: MutableRefObject<ComposerToken[]>
 }
@@ -503,10 +502,10 @@ export interface SlashHandlerContext {
   composer: {
     attachClipboardImage: () => void
     attachImagePath: (path: string) => void
-    enqueue: (text: string, display?: string) => void
+    enqueue: (text: string) => void
     hasSelection: boolean
     openEditor: () => Promise<void>
-    queueRef: MutableRefObject<QueueItem[]>
+    queueRef: MutableRefObject<string[]>
     selection: SelectionApi
     setInput: StateSetter<string>
   }

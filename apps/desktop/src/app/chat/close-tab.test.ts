@@ -1,14 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const closeFocusedSessionTab = vi.fn(() => false)
-const closeFocusedToolTab = vi.fn(() => false)
 const nextSessionTileForWorkspace = vi.fn<() => null | string>(() => null)
 const closeSessionTile = vi.fn()
 const requestFreshSession = vi.fn()
 
 vi.mock('@/components/pane-shell/tree/store', () => ({
-  closeFocusedSessionTab: () => closeFocusedSessionTab(),
-  closeFocusedToolTab: () => closeFocusedToolTab()
+  closeFocusedSessionTab: () => closeFocusedSessionTab()
 }))
 
 vi.mock('@/store/session-states', () => ({
@@ -53,7 +51,6 @@ beforeEach(() => {
   $activeSessionId.set(null)
   $workspaceIsPage.set(false)
   closeFocusedSessionTab.mockReturnValue(false)
-  closeFocusedToolTab.mockReturnValue(false)
   nextSessionTileForWorkspace.mockReturnValue(null)
   vi.clearAllMocks()
 })
@@ -137,14 +134,5 @@ describe('closeWorkspaceTab', () => {
 
     expect(closeActiveTab(vi.fn())).toBe(true)
     expect(requestFreshSession).toHaveBeenCalledTimes(1)
-  })
-
-  it('a focused tool panel (terminal / logs) claims ⌘W before main empties', () => {
-    loadedMainOnly()
-    closeFocusedToolTab.mockReturnValue(true)
-
-    expect(closeActiveTab(vi.fn())).toBe(true)
-    // The logs/terminal tab closed — main keeps its loaded chat.
-    expect(requestFreshSession).not.toHaveBeenCalled()
   })
 })

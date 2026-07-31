@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { composerPlainText, normalizeComposerEditorDom, renderComposerContents, RICH_INPUT_SLOT } from './rich-editor'
+import {
+  composerPlainText,
+  normalizeComposerEditorDom,
+  renderComposerContents,
+  RICH_INPUT_SLOT
+} from './rich-editor'
 
 function editor(): HTMLDivElement {
   const el = document.createElement('div')
