@@ -32,7 +32,6 @@ import {
 import { ContextMenu } from './context-menu'
 import { COMPOSER_AREAS, runComposerMiddleware } from './contrib'
 import { ComposerControls } from './controls'
-import { ComposerDirectiveActions } from './directive-actions'
 import { COMPOSER_DROP_ACTIVE_CLASS, COMPOSER_DROP_FADE_CLASS } from './drop-affordance'
 import { markActiveComposer } from './focus'
 import { HelpHint } from './help-hint'
@@ -58,7 +57,7 @@ import { ActionBadges } from './micro-actions'
 import { chipTypedPathOnSpace, pathifyRefs } from './path-refs'
 import { QueuePanel } from './queue-panel'
 import {
-  beginComposerComposition,
+  COMPOSER_PLACEHOLDER_CLASS,
   composerPlainText,
   deleteChipBeforeCaret,
   deleteSelectionInEditor,
@@ -948,6 +947,7 @@ export function ChatBar({
         autoCorrect="off"
         className={cn(
           'min-h-[1.625rem] min-h-(--composer-input-min-height) max-h-(--composer-input-max-height) cursor-text overflow-y-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere] bg-transparent pb-1 pr-1 pt-1 leading-normal text-foreground outline-none disabled:cursor-not-allowed',
+          COMPOSER_PLACEHOLDER_CLASS,
           '**:data-ref-text:cursor-default',
           stacked && 'pl-3',
           stacked ? 'w-full' : 'min-w-(--composer-input-inline-min-width) flex-1'
@@ -969,13 +969,8 @@ export function ChatBar({
           // until an unrelated edit forces a sync (#39614).
           flushEditorToDraft(event.currentTarget)
         }}
-        onCompositionStart={event => {
+        onCompositionStart={() => {
           composingRef.current = true
-
-          // Input events are skipped for the rest of the composition, so
-          // nothing else would clear the empty marker until it ends — and the
-          // hint would sit behind the preedit text the whole time (#75960).
-          beginComposerComposition(event.currentTarget)
         }}
         onDragOver={handleInputDragOver}
         onDrop={handleInputDrop}
@@ -990,7 +985,6 @@ export function ChatBar({
         spellCheck={false}
         suppressContentEditableWarning
       />
-      <ComposerDirectiveActions editorRef={editorRef} />
       {/* assistant-ui requires ComposerPrimitive.Input somewhere in the tree
         so the composer-state binding (text + IME + paste + form-submit hookup)
         wires up. We render the real input UI ourselves above via the
