@@ -33,7 +33,6 @@ import {
   $newSessionTabAction,
   $panesWithCloser,
   $treeDragging,
-  $treePaneEpochs,
   activateTreePane,
   closeAllTreeTabs,
   closeOtherTreeTabs,
@@ -43,7 +42,6 @@ import {
   isCollapsePane,
   isSessionStripPane,
   noteActiveTreeGroup,
-  reloadTreePane,
   restoreTreePane,
   SESSION_TILE_DRAG,
   setTreeGroupHeaderHidden,
@@ -98,12 +96,6 @@ function ZoneMenu({
 
     return (
       <>
-        {renderActionItem(kit, {
-          icon: 'refresh',
-          label: t.zones.reload,
-          onSelect: () => reloadTreePane(targetPane())
-        })}
-        <kit.Separator />
         {paneId !== undefined &&
           renderActionItem(kit, {
             icon: 'close',
@@ -186,9 +178,6 @@ export function TreeGroup({
   const narrow = useStore($narrowViewport)
   const newSessionTabAction = useStore($newSessionTabAction)
   const panesWithCloser = useStore($panesWithCloser)
-  // Reload epochs: only an explicit tab-menu Reload writes here, so this
-  // subscription costs nothing on a normal render.
-  const paneEpochs = useStore($treePaneEpochs)
 
   const paneFor = (id: string) => panes.find(p => p.id === id)
 
@@ -568,14 +557,9 @@ export function TreeGroup({
                     // can gate its hot (per-token) subscriptions while hidden;
                     // the group id identifies the ZONE it lives in, for state
                     // that is per-zone rather than per-tab (composer pop-out).
-                    // The reload epoch keys the CONTENT, not this layer: a
-                    // Reload remounts the contribution (effects re-run, state
-                    // resets) while the layer — and every other tab — stays.
                     <PaneGroupContext.Provider value={node.id}>
                       <PaneVisibleContext.Provider value={isActive}>
-                        <ContribBoundary id={pane.id} key={paneEpochs[paneId] ?? 0}>
-                          {pane.render()}
-                        </ContribBoundary>
+                        <ContribBoundary id={pane.id}>{pane.render()}</ContribBoundary>
                       </PaneVisibleContext.Provider>
                     </PaneGroupContext.Provider>
                   ) : (

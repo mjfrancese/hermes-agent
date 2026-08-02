@@ -18,7 +18,6 @@ from hermes_state_common import (
     SCHEMA_SQL,
     _PREVIEW_RAW_SELECT,
     _shape_preview,
-    _sql_session_last_active,
 )
 
 # Moved methods logged under the "hermes_state" logger before the split;
@@ -109,7 +108,10 @@ class SessionPortabilityMixin:
                      ORDER BY m.timestamp, m.id LIMIT 1),
                     ''
                 ) AS _preview_raw,
-                {_sql_session_last_active("s")} AS last_active
+                COALESCE(
+                    (SELECT MAX(m2.timestamp) FROM messages m2 WHERE m2.session_id = s.id),
+                    s.started_at
+                ) AS last_active
             FROM sessions s
             WHERE s.source = 'cron' AND s.id >= ? AND s.id < ?
             ORDER BY s.started_at DESC, s.id DESC
@@ -146,7 +148,10 @@ class SessionPortabilityMixin:
                      ORDER BY m.timestamp, m.id LIMIT 1),
                     ''
                 ) AS _preview_raw,
-                {_sql_session_last_active("s")} AS last_active
+                COALESCE(
+                    (SELECT MAX(m2.timestamp) FROM messages m2 WHERE m2.session_id = s.id),
+                    s.started_at
+                ) AS last_active
             FROM sessions s
             WHERE s.id = ?
         """
@@ -332,15 +337,6 @@ class SessionPortabilityMixin:
         fail foreign-key validation. Gateway routing, handoff, rewind, and other
         live runtime state are intentionally reset: this restores conversation
         history, not ownership of a live channel or process.
-
-        Activity contract (#76354 review S4): export INCLUDES the live
-        activity fields (``last_activity_at`` / ``last_activity_description``
-        / ``last_activity_provenance``) because they are part of the durable
-        row, but import deliberately RESETS them to NULL. Resurrecting a
-        stale "working ..." label on a machine where no agent is running
-        would fabricate activity the watchdog and session listings act on.
-        This asymmetry is intentional and covered by regression
-        (tests/gateway/test_watchdog_review_76354.py::test_s4_export_includes_activity_import_resets_it).
         """
         if not isinstance(sessions, list):
             raise ValueError("sessions must be a list")

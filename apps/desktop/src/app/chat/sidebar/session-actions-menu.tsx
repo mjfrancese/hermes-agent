@@ -7,7 +7,6 @@ import {
   closeAllTreeTabs,
   closeOtherTreeTabs,
   closeTreeTabsToRight,
-  reloadTreePane,
   treeTabCloseTargets
 } from '@/components/pane-shell/tree/store'
 import {
@@ -240,24 +239,12 @@ function useSessionActions({
     })
   ]
 
-  // TAB — verbs that act on the strip (tabs only; a row isn't a tab).
+  // TAB — close verbs that act on the strip (tabs only; a row isn't a tab).
   const closeTargets = surface === 'tab' && tabPaneId ? treeTabCloseTargets(tabPaneId) : null
 
-  const tabItems: ActionItemSpec[] =
+  const tabCloseItems: ActionItemSpec[] =
     surface === 'tab'
       ? [
-          ...(tabPaneId
-            ? [
-                spec({
-                  icon: 'refresh',
-                  label: t.zones.reload,
-                  onSelect: () => {
-                    triggerHaptic('selection')
-                    reloadTreePane(tabPaneId)
-                  }
-                })
-              ]
-            : []),
           ...(onClose
             ? [
                 spec({
@@ -355,10 +342,10 @@ function useSessionActions({
       />
       <kit.Separator />
       {workItems.map(item => renderActionItem(kit, item))}
-      {tabItems.length > 0 && (
+      {tabCloseItems.length > 0 && (
         <>
           <kit.Separator />
-          {tabItems.map(item => renderActionItem(kit, item))}
+          {tabCloseItems.map(item => renderActionItem(kit, item))}
         </>
       )}
       <kit.Separator />

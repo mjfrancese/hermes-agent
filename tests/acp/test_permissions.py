@@ -119,7 +119,7 @@ class TestApprovalBridge:
         assert result == "always"
 
 
-    def test_timeout_returns_timeout_and_cancels_future(self):
+    def test_timeout_returns_deny_and_cancels_future(self):
         loop = MagicMock(spec=asyncio.AbstractEventLoop)
         request_permission = AsyncMock(name="request_permission")
         future = MagicMock(spec=Future)
@@ -138,9 +138,7 @@ class TestApprovalBridge:
 
         scheduled["coro"].close()
 
-        # A no-response expiry is classified as "timeout" (still blocked,
-        # fail-closed) so the agent isn't told the user explicitly refused.
-        assert result == "timeout"
+        assert result == "deny"
         assert scheduled["loop"] is loop
         assert future.cancel.call_count == 1
 
