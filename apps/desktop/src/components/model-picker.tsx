@@ -94,10 +94,7 @@ export function ModelPickerDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent
-        bodyClassName="gap-0 overflow-hidden p-0"
-        className={cn('max-h-[85vh] max-w-2xl', contentClassName)}
-      >
+      <DialogContent className={cn('max-h-[85vh] max-w-2xl gap-0 overflow-hidden p-0', contentClassName)}>
         <DialogHeader className="border-b border-border px-4 py-3">
           <DialogTitle>{copy.title}</DialogTitle>
           <DialogDescription className="font-mono text-xs leading-relaxed">

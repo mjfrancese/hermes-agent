@@ -52,7 +52,6 @@ export function createClientSessionState(
     awaitingResponse: false,
     streamId: null,
     sawAssistantPayload: false,
-    adoptedRunningTurn: false,
     pendingBranchGroup: null,
     interrupted: false,
     interimBoundaryPending: false,

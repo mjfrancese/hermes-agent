@@ -20,10 +20,6 @@ export const HERMES_BASE_PATH = readBasePath();
 const BASE = HERMES_BASE_PATH;
 
 import type { DashboardTheme } from "@/themes/types";
-import {
-  attemptDashboardTokenReloadOnce,
-  clearDashboardTokenReloadAttempt,
-} from "@/lib/dashboard-auth-reload";
 
 // Ephemeral session token for protected endpoints.
 // Injected into index.html by the server — never fetched via API.
@@ -164,7 +160,20 @@ export async function fetchJSON<T>(
     // handled above, so reaching here in gated mode means a real
     // middleware failure that should not reload-loop.
     if (!window.__HERMES_AUTH_REQUIRED__ && !options?.allowUnauthorized) {
-      if (attemptDashboardTokenReloadOnce()) {
+      let alreadyReloaded = false;
+      try {
+        alreadyReloaded =
+          sessionStorage.getItem("hermes.tokenReloadAttempted") === "1";
+      } catch {
+        /* SSR / privacy mode — fall through to throw */
+      }
+      if (!alreadyReloaded) {
+        try {
+          sessionStorage.setItem("hermes.tokenReloadAttempted", "1");
+        } catch {
+          /* SSR / privacy mode — best effort */
+        }
+        window.location.reload();
         return new Promise<T>(() => {});
       }
     }
@@ -173,7 +182,11 @@ export async function fetchJSON<T>(
     // Clear the stale-token reload guard: a successful 2xx proves the
     // current ``window.__HERMES_SESSION_TOKEN__`` is valid, so the next
     // 401 — if any — should be allowed to trigger its own reload cycle.
-    clearDashboardTokenReloadAttempt();
+    try {
+      sessionStorage.removeItem("hermes.tokenReloadAttempted");
+    } catch {
+      /* SSR / privacy mode — ignore */
+    }
   }
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
@@ -385,10 +398,7 @@ export const api = {
   },
   getSessionMessages: (id: string, profile = getManagementProfile()) =>
     fetchJSON<SessionMessagesResponse>(
-      appendProfileParam(
-        `/api/sessions/${encodeURIComponent(id)}/messages?limit=500&order=latest`,
-        profile,
-      ),
+      appendProfileParam(`/api/sessions/${encodeURIComponent(id)}/messages`, profile),
     ),
   getSessionDetail: (id: string, profile = getManagementProfile()) =>
     fetchJSON<SessionInfo>(
@@ -1715,17 +1725,14 @@ export interface MemoryProviderFieldOption {
 export interface MemoryProviderField {
   key: string;
   label: string;
-  kind: "text" | "secret" | "select" | "boolean" | "integer" | "number";
+  kind: "text" | "secret" | "select" | "boolean";
   description: string;
   placeholder: string;
   required: boolean;
-  value: string | boolean | number;
+  value: string | boolean;
   is_set: boolean;
   options: MemoryProviderFieldOption[];
   url: string;
-  minimum?: number | null;
-  maximum?: number | null;
-  step?: number | null;
   when?: Record<string, string | boolean | number> | null;
 }
 
@@ -2007,12 +2014,6 @@ export interface SessionMessage {
 export interface SessionMessagesResponse {
   session_id: string;
   messages: SessionMessage[];
-  pagination?: {
-    limit: number;
-    offset: number;
-    order: "latest" | "oldest";
-    returned: number;
-  };
 }
 
 export interface LogsResponse {

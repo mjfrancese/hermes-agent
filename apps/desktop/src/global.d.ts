@@ -62,21 +62,6 @@ declare global {
         onState: (callback: (payload: PetOverlayStatePayload) => void) => () => void
         onControl: (callback: (payload: PetOverlayControl) => void) => () => void
       }
-      // HUD mode: the chrome-free floating chat. A FULL app renderer with its
-      // own gateway (like an instance window), sized and skinned as a floating
-      // bar — so it mounts the real composer rather than a lookalike. Main
-      // owns the window; `onChanged` keeps every window's toggle truthful.
-      hud?: {
-        open: (request?: { sessionId?: null | string }) => Promise<{ ok: boolean }>
-        close: () => Promise<{ ok: boolean }>
-        setIgnoreMouse: (ignore: boolean) => void
-        moveBy: (delta: { x: number; y: number }) => void
-        setVibrancy: (on: boolean) => Promise<{ ok: boolean }>
-        setSession: (sessionId: null | string) => void
-        onGoto: (callback: (sessionId: string) => void) => () => void
-        onChanged: (callback: (state: { open: boolean; sessionId: null | string }) => void) => () => void
-        onCursor: (callback: (point: { x: number; y: number } | null) => void) => () => void
-      }
       // Quick Entry: a global-hotkey mini composer window. Main owns the OS
       // shortcut registration + the persisted preference (it must restore the
       // shortcut on a cold launch without the renderer visiting Settings), so
@@ -134,18 +119,6 @@ declare global {
       api: <T>(request: HermesApiRequest) => Promise<T>
       notify: (payload: HermesNotification) => Promise<boolean>
       requestMicrophoneAccess: () => Promise<boolean>
-      /** read_window_below tool: metadata for the OS window directly underneath this one (never pixels). */
-      readWindowBelow?: () => Promise<{
-        frontmost: { app: string; title: string } | null
-        note?: string
-        platform: string
-        window: {
-          app: string
-          bounds: { height: number; width: number; x: number; y: number }
-          id: number
-          title: string
-        } | null
-      } | null>
       readFileDataUrl: (filePath: string) => Promise<string>
       /** Remote non-image attach: higher dedicated cap than preview/Settings default. */
       readFileDataUrlForAttach?: (filePath: string) => Promise<string>
@@ -156,12 +129,6 @@ declare global {
       }
       readFileText: (filePath: string) => Promise<HermesReadFileTextResult>
       selectPaths: (options?: HermesSelectPathsOptions) => Promise<string[]>
-      /** Native save dialog; returns the chosen path or null on cancel. */
-      selectSavePath?: (options?: {
-        defaultPath?: string
-        filters?: Array<{ extensions: string[]; name: string }>
-        title?: string
-      }) => Promise<null | string>
       writeClipboard: (text: string) => Promise<boolean>
       readClipboard: () => Promise<string>
       saveImageFromUrl: (url: string) => Promise<boolean>
@@ -226,8 +193,7 @@ declare global {
           options?: { force?: boolean }
         ) => Promise<{ removed: string }>
         branchSwitch: (repoPath: string, branch: string) => Promise<{ branch: string }>
-        // The local branches, plus the remote-tracking refs that have no local
-        // branch, for the "convert a branch into a worktree" picker.
+        // Local branches for the "convert a branch into a worktree" picker.
         branchList: (repoPath: string) => Promise<HermesGitBranch[]>
         // Local + remote-tracking branches for the "base branch" picker in the
         // new-worktree dialog. The remote default (origin/HEAD) is flagged so
@@ -803,8 +769,6 @@ export interface HermesNotification {
   silent?: boolean
   kind?: string
   sessionId?: string
-  /** Dedupe discriminator for session-less notifications (e.g. plugin id). */
-  tag?: string
   actions?: { id: string; text: string }[]
 }
 
@@ -817,7 +781,7 @@ export interface HermesPreviewTarget {
   language?: string
   mimeType?: string
   path?: string
-  previewKind?: 'binary' | 'html' | 'image' | 'pdf' | 'text'
+  previewKind?: 'binary' | 'html' | 'image' | 'text'
   renderMode?: 'preview' | 'source'
   source: string
   url: string
@@ -848,17 +812,13 @@ export interface HermesGitWorktree {
   locked: boolean
 }
 
-// A branch that the "convert a branch into a worktree" picker offers: the local
-// heads, plus the remote-tracking refs that have no local branch yet.
-// `checkedOut` means that a selection opens that checkout. `isDefault` means
-// that a selection switches the main checkout, and does not make
-// `.worktrees/main`. `isRemote` means that a selection first makes a local
-// branch that tracks the remote one.
+// A local branch as offered by the "convert a branch into a worktree" picker.
+// `checkedOut` means selecting opens that checkout; `isDefault` means selecting
+// switches the main checkout instead of creating `.worktrees/main`.
 export interface HermesGitBranch {
   name: string
   checkedOut: boolean
   isDefault: boolean
-  isRemote: boolean
   worktreePath: null | string
 }
 

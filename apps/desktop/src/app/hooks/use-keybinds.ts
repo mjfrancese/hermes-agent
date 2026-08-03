@@ -2,7 +2,6 @@ import { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router'
 
 import { closeActiveTab } from '@/app/chat/close-tab'
-import { hudTargetSessionId } from '@/app/hud/handoff'
 import { setTerminalTakeover } from '@/app/right-sidebar/store'
 import { closeActiveTerminal, createTerminal, cycleTerminal } from '@/app/right-sidebar/terminal/terminals'
 import {
@@ -17,7 +16,7 @@ import { findBarClaimsCombo } from '@/lib/find-in-page'
 import { contributedKeybindHandler, PROFILE_SLOT_COUNT, SESSION_SLOT_COUNT } from '@/lib/keybinds/actions'
 import { comboAllowedInInput, comboFromEvent, isEditableTarget } from '@/lib/keybinds/combo'
 import { composerFocusKeysAllowed, isComposerFocusSoftCombo, typeToFocusChar } from '@/lib/keybinds/composer-focus-keys'
-import { openWorktreeDialog } from '@/store/coding-status'
+import { $repoStatus } from '@/store/coding-status'
 import { toggleCommandPalette } from '@/store/command-palette'
 import {
   $findInPage,
@@ -25,7 +24,6 @@ import {
   findPrevious as findPreviousMatch,
   openFindBar
 } from '@/store/find-in-page'
-import { toggleHud } from '@/store/hud'
 import { $capture, $comboIndex, endCapture, setBinding } from '@/store/keybinds'
 import {
   requestSessionSearchFocus,
@@ -42,9 +40,9 @@ import {
   switchToDefaultProfile,
   toggleShowAllProfiles
 } from '@/store/profile'
-import { openFolderAsProject } from '@/store/projects'
+import { openFolderAsProject, requestNewWorktree } from '@/store/projects'
 import { toggleReview } from '@/store/review'
-import { $selectedStoredSessionId, setModelPickerOpen } from '@/store/session'
+import { setModelPickerOpen } from '@/store/session'
 import { reopenLastClosedTile } from '@/store/session-states'
 import {
   $switcherOpen,
@@ -64,13 +62,11 @@ import { useTheme } from '@/themes/context'
 import { requestComposerFocus, requestModelMenuToggle, requestVoiceToggle } from '../chat/composer/focus'
 import { openSession } from '../open-session'
 import {
-  $workspaceIsPage,
   AGENTS_ROUTE,
   ARTIFACTS_ROUTE,
   CRON_ROUTE,
   MESSAGING_ROUTE,
   navigateToWorkspacePage,
-  NEW_CHAT_ROUTE,
   PROFILES_ROUTE,
   sessionRoute,
   SETTINGS_ROUTE,
@@ -103,29 +99,11 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
 
   const profileSwitchHandlers: HandlerMap = {}
 
-  // A tab key that lands on the WORKSPACE tab while a full page (skills /
-  // messaging / artifacts / a plugin route) covers it must also route back to
-  // the chat: the workspace pane is already the zone's active tab behind the
-  // page, so fronting it alone changes nothing on screen and the key reads
-  // dead. Mirrors `openSession`'s full-page rule — only a route change puts
-  // the chat back.
-  const leavePageForWorkspaceChat = (paneId: null | string) => {
-    if (paneId === 'workspace' && $workspaceIsPage.get()) {
-      const selected = $selectedStoredSessionId.get()
-
-      navigate(selected ? sessionRoute(selected) : NEW_CHAT_ROUTE)
-    }
-  }
-
   for (let slot = 1; slot <= PROFILE_SLOT_COUNT; slot += 1) {
     // ⌘1…⌘9 switch the FOCUSED zone's tab when it's a real tab strip; only a
     // single-pane (or unfocused) layout falls through to the profile switch.
     profileSwitchHandlers[`profile.switch.${slot}`] = () => {
-      const pane = activateTreeTabSlot(slot)
-
-      if (pane) {
-        leavePageForWorkspaceChat(pane)
-      } else {
+      if (!activateTreeTabSlot(slot)) {
         switchProfileToSlot(slot)
       }
     }
@@ -152,19 +130,6 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
   const stepSession = (direction: 1 | -1) => {
     onSwitcherTabDown()
     goToSession(openOrAdvanceSwitcher(direction))
-  }
-
-  // ⌃Tab cycles the focused session/main tab strip; only a non-tabbed focus
-  // falls through to the recent-session switcher. Landing on the workspace
-  // under a full page routes back to the chat (same as ⌘1).
-  const cycleTab = (direction: 1 | -1) => {
-    const pane = cycleTreeTabInFocusedZone(direction)
-
-    if (pane) {
-      leavePageForWorkspaceChat(pane)
-    } else {
-      stepSession(direction)
-    }
   }
 
   const showFiles = () => {
@@ -205,16 +170,16 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
     },
     'session.newTab': () => deps.openNewSessionTab(),
     'session.newWindow': () => void openNewWindow(),
-    'session.next': () => cycleTab(1),
-    'session.prev': () => cycleTab(-1),
+    // ⌃Tab cycles the focused session/main tab strip; only a non-tabbed focus
+    // falls through to the recent-session switcher.
+    'session.next': () => void (cycleTreeTabInFocusedZone(1) || stepSession(1)),
+    'session.prev': () => void (cycleTreeTabInFocusedZone(-1) || stepSession(-1)),
     ...sessionSlotHandlers,
     'session.focusSearch': requestSessionSearchFocus,
     'session.togglePin': deps.toggleSelectedPin,
-    // openWorktreeDialog resolves the target. There is no test for a repo
-    // here, so the key works from a detached session that sits inside a
-    // project, and not only from a session with a repo. When no repo is in
-    // reach, openWorktreeDialog does nothing.
-    'workspace.newWorktree': () => void openWorktreeDialog(),
+    // Only meaningful inside a git repo — a no-op otherwise (the key falls
+    // through instead of silently doing nothing).
+    'workspace.newWorktree': () => $repoStatus.get() && requestNewWorktree(),
     // ⌘O: native folder picker → open the folder as a project (upsert) with a
     // fresh session anchored there.
     'workspace.openFolder': () => void openFolderAsProject(),
@@ -229,7 +194,6 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
     'view.toggleReview': toggleReview,
     'view.toggleStatusbar': toggleStatusbarVisible,
     'view.showFiles': showFiles,
-    'view.toggleHud': () => toggleHud(hudTargetSessionId()),
     'view.showTerminal': () => togglePaneVisible('terminal'),
     // Create first so the pane's open-effect ensure sees a non-empty set and
     // doesn't also spawn one — net effect is exactly one fresh terminal.

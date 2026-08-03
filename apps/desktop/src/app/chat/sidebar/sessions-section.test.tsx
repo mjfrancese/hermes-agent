@@ -78,6 +78,7 @@ describe('SidebarSessionsSection memoization & virtualizer stability', () => {
         open={true}
         pinned={false}
         sessions={sessions}
+        workingSessionIdSet={new Set()}
       />
     )
 
@@ -99,6 +100,7 @@ describe('SidebarSessionsSection memoization & virtualizer stability', () => {
         open={true}
         pinned={false}
         sessions={sessions}
+        workingSessionIdSet={new Set()}
       />
     )
 
@@ -128,6 +130,7 @@ describe('SidebarSessionsSection memoization & virtualizer stability', () => {
         open={true}
         pinned={false}
         sessions={initialSessions}
+        workingSessionIdSet={new Set()}
       />
     )
 
@@ -148,6 +151,7 @@ describe('SidebarSessionsSection memoization & virtualizer stability', () => {
         open={true}
         pinned={false}
         sessions={initialSessions}
+        workingSessionIdSet={new Set()}
       />
     )
 
@@ -170,6 +174,7 @@ describe('SidebarSessionsSection memoization & virtualizer stability', () => {
         open={true}
         pinned={false}
         sessions={updatedSessions}
+        workingSessionIdSet={new Set()}
       />
     )
 
