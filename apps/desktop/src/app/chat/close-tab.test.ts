@@ -1,4 +1,3 @@
-import { atom } from 'nanostores'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const closeFocusedSessionTab = vi.fn(() => false)
@@ -18,11 +17,7 @@ vi.mock('@/store/session-states', () => ({
 }))
 
 vi.mock('@/store/profile', () => ({
-  // The layout store reads the sidebar's profile scope; this suite only cares
-  // about the fresh-session call.
-  $showAllProfiles: atom(false),
-  requestFreshSession: () => requestFreshSession(),
-  setShowAllProfiles: () => {}
+  requestFreshSession: () => requestFreshSession()
 }))
 
 import { $previewTabs, closeRightRail, openPreview, type PreviewTarget } from '@/store/preview'

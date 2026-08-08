@@ -114,7 +114,7 @@ class TestProviderGating:
         trimmed = _write_wav(trimmed_dir / "a-trimmed.wav", [("tone", 1)])
         seen = {}
 
-        def fake_groq(file_path, model_name, *, language=None, prompt=None):
+        def fake_groq(file_path, model_name):
             seen["path"] = file_path
             return {"success": True, "transcript": "hi", "provider": "groq"}
 
@@ -136,7 +136,7 @@ class TestProviderGating:
         wav = _write_wav(tmp_path / "a.wav", [("tone", 1)])
         seen = {}
 
-        def fake_groq(file_path, model_name, *, language=None, prompt=None):
+        def fake_groq(file_path, model_name):
             seen["path"] = file_path
             return {"success": True, "transcript": "hi", "provider": "groq"}
 

@@ -213,46 +213,13 @@ describe('useModelControls', () => {
     expect($currentModel.get()).toBe('poolside/laguna-xs-2.1:free')
     expect($currentProvider.get()).toBe('nous')
     expect(getCurrentModelSource()).toBe('default')
-    expect(queryClient.getQueryData(modelOptionsQueryKey('default'))).toEqual({
+    expect(queryClient.getQueryData(modelOptionsQueryKey('default'))).toMatchObject({
       model: 'poolside/laguna-xs-2.1:free',
-      provider: 'nous',
-      providers: [
-        {
-          models: ['poolside/laguna-xs-2.1:free'],
-          name: 'nous',
-          slug: 'nous'
-        }
-      ]
+      provider: 'nous'
     })
   })
 
-  it('preserves a populated model catalog when painting a saved profile default', () => {
-    const queryClient = new QueryClient()
-    const providers = [{ models: ['tencent/hy3:free'], name: 'Nous', slug: 'nous' }]
-
-    queryClient.setQueryData(modelOptionsQueryKey('default'), {
-      model: 'tencent/hy3:free',
-      provider: 'nous',
-      providers
-    })
-
-    const { result } = renderHook(() =>
-      useModelControls({
-        queryClient,
-        requestGateway: vi.fn()
-      })
-    )
-
-    result.current.applySavedMainModel('nous', 'poolside/laguna-xs-2.1:free')
-
-    expect(queryClient.getQueryData(modelOptionsQueryKey('default'))).toEqual({
-      model: 'poolside/laguna-xs-2.1:free',
-      provider: 'nous',
-      providers
-    })
-  })
-
-  it('persists an active primary-session picker change as the profile default via config.set --global', async () => {
+  it('routes active-session picker changes through config.set with an explicit session-scoped provider', async () => {
     $activeSessionId.set('session-1')
     const requestGateway = vi.fn(async () => ({ key: 'model', value: 'claude-sonnet-4.6' }) as never)
     let controls!: Controls
@@ -266,13 +233,10 @@ describe('useModelControls', () => {
       })
     ).resolves.toBe(true)
 
-    // The primary main agent's pick IS the profile default, so it persists to
-    // config.yaml (model.default + model.provider) — which is what lets a
-    // chosen subscription provider outrank a leftover OPENAI_API_KEY env var.
     expect(requestGateway).toHaveBeenCalledWith('config.set', {
       session_id: 'session-1',
       key: 'model',
-      value: 'claude-sonnet-4.6 --provider anthropic --global'
+      value: 'claude-sonnet-4.6 --provider anthropic --session'
     })
     expect(requestGateway).not.toHaveBeenCalledWith('slash.exec', expect.anything())
   })

@@ -9,8 +9,6 @@ See: NousResearch/hermes-agent#7622
 import os
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 import hermes_cli.gateway as gateway_mod
 
 
@@ -53,15 +51,8 @@ def _fake_proc_dir(entries: dict):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.linux_only
 class TestProcFallback:
-    """_scan_gateway_pids reads /proc when available, skips ps.
-
-    Linux-only: ``/proc/<pid>/cmdline`` is the subject. The non-Windows arm of
-    ``_scan_gateway_pids`` is selected by the real host here, so the previous
-    ``is_windows`` stub is gone — only the /proc filesystem itself is faked so
-    the scan sees deterministic PIDs.
-    """
+    """_scan_gateway_pids reads /proc when available, skips ps."""
 
     def test_detects_gateway_pid_via_proc(self):
         my_pid = os.getpid()
@@ -73,6 +64,7 @@ class TestProcFallback:
         _isdir, _listdir, _open = _fake_proc_dir(entries)
 
         with (
+            patch("hermes_cli.gateway.is_windows", return_value=False),
             patch("os.path.isdir", side_effect=_isdir),
             patch("os.listdir", side_effect=_listdir),
             patch("builtins.open", side_effect=_open),
@@ -101,6 +93,7 @@ class TestProcFallback:
             raise PermissionError("no access")
 
         with (
+            patch("hermes_cli.gateway.is_windows", return_value=False),
             patch("os.path.isdir", side_effect=_isdir),
             patch("os.listdir", side_effect=_listdir),
             patch("builtins.open", side_effect=_open),

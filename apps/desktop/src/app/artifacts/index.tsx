@@ -2,7 +2,6 @@ import type * as React from 'react'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 
-import { TitlebarIcon } from '@/app/shell/titlebar-icon'
 import { ZoomableImage } from '@/components/chat/zoomable-image'
 import { PageLoader } from '@/components/page-loader'
 import { Button } from '@/components/ui/button'
@@ -29,7 +28,7 @@ import {
   urlSlugTitleLabel,
   useLinkTitle
 } from '@/lib/external-link'
-import { FileImage, FileText, FolderOpen, Link2 } from '@/lib/icons'
+import { FileImage, FileText, FolderOpen, Link2, Loader2, RefreshCw } from '@/lib/icons'
 import { downloadGatewayMediaFile, isRemoteGateway } from '@/lib/media'
 import { normalize } from '@/lib/text'
 import { fmtDayTime } from '@/lib/time'
@@ -330,7 +329,7 @@ export function ArtifactsView({ setStatusbarItemGroup: _setStatusbarItemGroup, .
             size="icon-titlebar"
             variant="ghost"
           >
-            {refreshing ? <TitlebarIcon name="loading" spinning /> : <TitlebarIcon name="refresh" />}
+            {refreshing ? <Loader2 className="animate-spin" /> : <RefreshCw />}
           </Button>
         </Tip>
       }
@@ -474,7 +473,7 @@ function ArtifactImageCard({ artifact, failedImage, onImageError, onOpenChat }: 
     let active = true
 
     setSrc('')
-    void artifactImageSrc(artifact.value)
+    void artifactImageSrc(artifact.value, artifact.href)
       .then(nextSrc => {
         if (active) {
           setSrc(nextSrc)

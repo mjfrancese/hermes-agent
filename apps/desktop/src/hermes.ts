@@ -86,11 +86,6 @@ import type {
 export const STARTUP_REQUEST_TIMEOUT_MS = 60_000
 const DEFAULT_GATEWAY_REQUEST_TIMEOUT_MS = 30_000
 const SESSION_LIST_REQUEST_TIMEOUT_MS = 60_000
-// The cron trigger endpoint intentionally waits for the whole job so its
-// response reflects the persisted execution result. Agent jobs can run far
-// longer than the Electron fetch default; keep this override local to the one
-// synchronous long-operation endpoint rather than weakening all API timeouts.
-export const CRON_TRIGGER_REQUEST_TIMEOUT_MS = 24 * 60 * 60 * 1000
 // prompt.submit is effectively fire-and-forget: turn completion is signaled by
 // stream / message.complete events, NOT by the RPC return. A long turn (MoA
 // presets running references + aggregator in series, deep reasoning, large tool
@@ -467,9 +462,6 @@ export interface SidebarSessionSlice {
   /** Per-profile "the window came back full, more rows exist on disk" flags —
    *  what pagination needs, without a COUNT(*) per profile DB per refresh. */
   profiles_truncated?: Record<string, boolean>
-  /** Per-profile tokens and spend over every session, not just this window.
-   *  Absent from the legacy per-slice endpoint, which has no aggregate. */
-  profiles_usage?: Record<string, { cost_usd: number; tokens: number }>
 }
 
 /** Which profiles filled their per-profile window in a returned page. The
@@ -567,23 +559,6 @@ async function listSidebarSessionsLegacy(req: SidebarSessionsRequest): Promise<S
     messaging: { sessions: messaging.sessions },
     ...(errors.length ? { errors } : {})
   }
-}
-
-/** The PR each of these sessions opened, recovered from its own transcript —
- *  for sessions whose recorded branch can't answer (they started on trunk and
- *  did the work in a worktree). Also returns every id it looked at, so the
- *  caller can remember a miss and never ask again. */
-export function scanSessionPullRequests(
-  ids: string[]
-): Promise<{ pull_requests: Record<string, { number: number; url: string }>; scanned: string[] }> {
-  return window.hermesDesktop.api<{
-    pull_requests: Record<string, { number: number; url: string }>
-    scanned: string[]
-  }>({
-    path: '/api/profiles/sessions/pull-requests',
-    method: 'POST',
-    body: { ids }
-  })
 }
 
 export async function listSidebarSessions(req: SidebarSessionsRequest): Promise<SidebarSessionsResponse> {
@@ -684,7 +659,7 @@ export function getSession(id: string, profile?: string | null): Promise<Session
 export function getSessionMessages(
   id: string,
   profile?: string | null,
-  page: { limit?: number; offset?: number; order?: 'latest' | 'oldest'; includeCompacted?: boolean } = {}
+  page: { limit?: number; offset?: number; order?: 'latest' | 'oldest' } = {}
 ): Promise<SessionMessagesResponse> {
   const query = new URLSearchParams()
 
@@ -704,10 +679,6 @@ export function getSessionMessages(
     query.set('order', page.order)
   }
 
-  if (page.includeCompacted !== undefined) {
-    query.set('include_compacted', String(page.includeCompacted))
-  }
-
   const suffix = query.size ? `?${query.toString()}` : ''
 
   return window.hermesDesktop.api<SessionMessagesResponse>({
@@ -717,10 +688,7 @@ export function getSessionMessages(
 }
 
 export function getLatestSessionMessages(id: string, profile?: string | null): Promise<SessionMessagesResponse> {
-  // includeCompacted: durable display history must include rows preserved by
-  // in-place compaction (active=0, compacted=1); without them the transcript
-  // silently ends at the compaction boundary and earlier turns are unreachable.
-  return getSessionMessages(id, profile, { limit: 500, order: 'latest', includeCompacted: true })
+  return getSessionMessages(id, profile, { limit: 500, order: 'latest' })
 }
 
 export async function getAllSessionMessages(
@@ -739,8 +707,7 @@ export async function getAllSessionMessages(
     const page = await getSessionMessages(id, profile, {
       limit: pageSize,
       offset,
-      order: 'oldest',
-      includeCompacted: true
+      order: 'oldest'
     })
 
     resolvedSessionId = page.session_id
@@ -846,9 +813,9 @@ export function getHermesConfig(profile?: string): Promise<HermesConfig> {
   })
 }
 
-export function getHermesConfigRecord(profile?: null | string): Promise<HermesConfigRecord> {
+export function getHermesConfigRecord(): Promise<HermesConfigRecord> {
   return window.hermesDesktop.api<HermesConfigRecord>({
-    ...profileScoped(profile),
+    ...profileScoped(),
     path: '/api/config'
   })
 }
@@ -901,9 +868,9 @@ export function getEnvVars(): Promise<Record<string, EnvVarInfo>> {
   })
 }
 
-export function setEnvVar(key: string, value: string, profile?: null | string): Promise<{ ok: boolean }> {
+export function setEnvVar(key: string, value: string): Promise<{ ok: boolean }> {
   return window.hermesDesktop.api<{ ok: boolean }>({
-    ...profileScoped(profile),
+    ...profileScoped(),
     path: '/api/env',
     method: 'PUT',
     body: { key, value }
@@ -925,14 +892,12 @@ export function validateProviderCredential(
 
 export function getCustomEndpoints(): Promise<CustomEndpointsResponse> {
   return window.hermesDesktop.api<CustomEndpointsResponse>({
-    ...profileScoped(),
     path: '/api/providers/custom-endpoints'
   })
 }
 
 export function saveCustomEndpoint(endpoint: CustomEndpointUpdate): Promise<CustomEndpointsResponse> {
   return window.hermesDesktop.api<CustomEndpointsResponse>({
-    ...profileScoped(),
     path: '/api/providers/custom-endpoints',
     method: 'POST',
     body: endpoint
@@ -949,7 +914,6 @@ export function validateCustomEndpoint(endpoint: CustomEndpointUpdate): Promise<
 
 export function activateCustomEndpoint(id: string): Promise<{ ok: boolean; provider: string; model: string }> {
   return window.hermesDesktop.api<{ ok: boolean; provider: string; model: string }>({
-    ...profileScoped(),
     path: `/api/providers/custom-endpoints/${encodeURIComponent(id)}/activate`,
     method: 'POST'
   })
@@ -957,24 +921,23 @@ export function activateCustomEndpoint(id: string): Promise<{ ok: boolean; provi
 
 export function deleteCustomEndpoint(id: string): Promise<CustomEndpointsResponse> {
   return window.hermesDesktop.api<CustomEndpointsResponse>({
-    ...profileScoped(),
     path: `/api/providers/custom-endpoints/${encodeURIComponent(id)}`,
     method: 'DELETE'
   })
 }
 
-export function deleteEnvVar(key: string, profile?: null | string): Promise<{ ok: boolean }> {
+export function deleteEnvVar(key: string): Promise<{ ok: boolean }> {
   return window.hermesDesktop.api<{ ok: boolean }>({
-    ...profileScoped(profile),
+    ...profileScoped(),
     path: '/api/env',
     method: 'DELETE',
     body: { key }
   })
 }
 
-export function revealEnvVar(key: string, profile?: null | string): Promise<{ key: string; value: string }> {
+export function revealEnvVar(key: string): Promise<{ key: string; value: string }> {
   return window.hermesDesktop.api<{ key: string; value: string }>({
-    ...profileScoped(profile),
+    ...profileScoped(),
     path: '/api/env/reveal',
     method: 'POST',
     body: { key }
@@ -996,9 +959,9 @@ export function disconnectOAuthProvider(providerId: string): Promise<{ ok: boole
   })
 }
 
-export function startOAuthLogin(providerId: string, profile?: null | string): Promise<OAuthStartResponse> {
+export function startOAuthLogin(providerId: string): Promise<OAuthStartResponse> {
   return window.hermesDesktop.api<OAuthStartResponse>({
-    ...profileScoped(profile),
+    ...profileScoped(),
     path: `/api/providers/oauth/${encodeURIComponent(providerId)}/start`,
     method: 'POST',
     body: {}
@@ -1014,13 +977,9 @@ export function submitOAuthCode(providerId: string, sessionId: string, code: str
   })
 }
 
-export function pollOAuthSession(
-  providerId: string,
-  sessionId: string,
-  profile?: null | string
-): Promise<OAuthPollResponse> {
+export function pollOAuthSession(providerId: string, sessionId: string): Promise<OAuthPollResponse> {
   return window.hermesDesktop.api<OAuthPollResponse>({
-    ...profileScoped(profile),
+    ...profileScoped(),
     path: `/api/providers/oauth/${encodeURIComponent(providerId)}/poll/${encodeURIComponent(sessionId)}`
   })
 }
@@ -1130,9 +1089,9 @@ export interface McpOAuthFlow {
 
 /** Connect to the server, list its tools, disconnect. Slow (spawns/handshakes
  *  for real) — well past the 15s default fetch timeout. */
-export function testMcpServer(name: string, profile?: null | string): Promise<McpTestResult> {
+export function testMcpServer(name: string): Promise<McpTestResult> {
   return window.hermesDesktop.api<McpTestResult>({
-    ...profileScoped(profile),
+    ...profileScoped(),
     path: `/api/mcp/servers/${encodeURIComponent(name)}/test`,
     method: 'POST',
     timeoutMs: 60_000
@@ -1142,12 +1101,9 @@ export function testMcpServer(name: string, profile?: null | string): Promise<Mc
 /** Replace the whole `mcp_servers` map (the mcp.json editor's save). Unlike
  *  `saveHermesConfig`, this REPLACES rather than deep-merges, so deletes,
  *  re-enables (dropping `enabled: false`), and removed nested fields persist. */
-export function saveMcpServers(
-  servers: Record<string, Record<string, unknown>>,
-  profile?: null | string
-): Promise<{ ok: boolean }> {
+export function saveMcpServers(servers: Record<string, Record<string, unknown>>): Promise<{ ok: boolean }> {
   return window.hermesDesktop.api<{ ok: boolean }>({
-    ...profileScoped(profile),
+    ...profileScoped(),
     path: '/api/mcp/servers',
     method: 'PUT',
     body: { servers }
@@ -1155,73 +1111,53 @@ export function saveMcpServers(
 }
 
 /** Start an MCP OAuth flow and return the authorization URL. */
-export function authMcpServer(name: string, profile?: null | string): Promise<McpOAuthFlow> {
+export function authMcpServer(name: string): Promise<McpOAuthFlow> {
   return window.hermesDesktop.api<McpOAuthFlow>({
-    ...profileScoped(profile),
+    ...profileScoped(),
     path: `/api/mcp/servers/${encodeURIComponent(name)}/auth`,
     method: 'POST',
     timeoutMs: 60_000
   })
 }
 
-export function getMcpOAuthFlow(flowId: string, profile?: null | string): Promise<McpOAuthFlow> {
+export function getMcpOAuthFlow(flowId: string): Promise<McpOAuthFlow> {
   return window.hermesDesktop.api<McpOAuthFlow>({
-    ...profileScoped(profile),
+    ...profileScoped(),
     path: `/api/mcp/oauth/flows/${encodeURIComponent(flowId)}`
   })
 }
 
-/** Cancel an in-flight MCP OAuth flow server-side, freeing the per-server
- *  "already in progress" slot so a retry doesn't 409. */
-export function cancelMcpOAuthFlow(flowId: string, profile?: null | string): Promise<{ ok: boolean; status: string }> {
-  return window.hermesDesktop.api<{ ok: boolean; status: string }>({
-    ...profileScoped(profile),
-    path: `/api/mcp/oauth/flows/${encodeURIComponent(flowId)}`,
-    method: 'DELETE'
-  })
-}
-
-// The optional trailing `profile` on every capability fetcher below is the
-// Capabilities view's profile-scope override: it lets the Skills/Tools/MCP
-// panels configure ANY profile without swapping the app-wide active profile.
-// Omitting it (every pre-existing caller) means `profileScoped(undefined)`
-// falls back to the app-wide `_apiProfile`, so behavior is byte-identical.
-export function getToolsets(profile?: null | string): Promise<ToolsetInfo[]> {
+export function getToolsets(): Promise<ToolsetInfo[]> {
   return window.hermesDesktop.api<ToolsetInfo[]>({
-    ...profileScoped(profile),
+    ...profileScoped(),
     path: '/api/tools/toolsets'
   })
 }
 
 export function setToolsetEnabled(
   name: string,
-  enabled: boolean,
-  profile?: null | string
+  enabled: boolean
 ): Promise<{ ok: boolean; name: string; enabled: boolean }> {
   return window.hermesDesktop.api<{ ok: boolean; name: string; enabled: boolean }>({
-    ...profileScoped(profile),
+    ...profileScoped(),
     path: `/api/tools/toolsets/${encodeURIComponent(name)}`,
     method: 'PUT',
     body: { enabled }
   })
 }
 
-export function getToolsetConfig(name: string, profile?: null | string): Promise<ToolsetConfig> {
+export function getToolsetConfig(name: string): Promise<ToolsetConfig> {
   return window.hermesDesktop.api<ToolsetConfig>({
-    ...profileScoped(profile),
+    ...profileScoped(),
     path: `/api/tools/toolsets/${encodeURIComponent(name)}/config`
   })
 }
 
-export function getToolsetModels(
-  name: string,
-  provider?: string,
-  profile?: null | string
-): Promise<ToolsetModelsResponse> {
+export function getToolsetModels(name: string, provider?: string): Promise<ToolsetModelsResponse> {
   const suffix = provider ? `?provider=${encodeURIComponent(provider)}` : ''
 
   return window.hermesDesktop.api<ToolsetModelsResponse>({
-    ...profileScoped(profile),
+    ...profileScoped(),
     path: `/api/tools/toolsets/${encodeURIComponent(name)}/models${suffix}`
   })
 }
@@ -1229,11 +1165,10 @@ export function getToolsetModels(
 export function selectToolsetModel(
   name: string,
   model: string,
-  provider?: string,
-  profile?: null | string
+  provider?: string
 ): Promise<{ ok: boolean; name: string; model: string }> {
   return window.hermesDesktop.api<{ ok: boolean; name: string; model: string }>({
-    ...profileScoped(profile),
+    ...profileScoped(),
     path: `/api/tools/toolsets/${encodeURIComponent(name)}/model`,
     method: 'PUT',
     body: { model, provider }
@@ -1257,24 +1192,19 @@ export interface SelectToolsetProviderResponse {
 export function selectToolsetProvider(
   name: string,
   provider: string,
-  capability?: 'search' | 'extract',
-  profile?: null | string
+  capability?: 'search' | 'extract'
 ): Promise<SelectToolsetProviderResponse> {
   return window.hermesDesktop.api<SelectToolsetProviderResponse>({
-    ...profileScoped(profile),
+    ...profileScoped(),
     path: `/api/tools/toolsets/${encodeURIComponent(name)}/provider`,
     method: 'PUT',
     body: capability ? { provider, capability } : { provider }
   })
 }
 
-export function runToolsetPostSetup(
-  name: string,
-  key: string,
-  profile?: null | string
-): Promise<ActionResponse & { key: string }> {
+export function runToolsetPostSetup(name: string, key: string): Promise<ActionResponse & { key: string }> {
   return window.hermesDesktop.api<ActionResponse & { key: string }>({
-    ...profileScoped(profile),
+    ...profileScoped(),
     path: `/api/tools/toolsets/${encodeURIComponent(name)}/post-setup`,
     method: 'POST',
     body: { key }
@@ -1500,8 +1430,7 @@ export function triggerCronJob(jobId: string): Promise<CronJob> {
   return window.hermesDesktop.api<CronJob>({
     ...profileScoped(),
     path: `/api/cron/jobs/${encodeURIComponent(jobId)}/trigger`,
-    method: 'POST',
-    timeoutMs: CRON_TRIGGER_REQUEST_TIMEOUT_MS
+    method: 'POST'
   })
 }
 
@@ -1748,9 +1677,9 @@ export function checkHermesUpdate(force = false): Promise<BackendUpdateCheckResp
   })
 }
 
-export function getActionStatus(name: string, lines = 200, profile?: null | string): Promise<ActionStatusResponse> {
+export function getActionStatus(name: string, lines = 200): Promise<ActionStatusResponse> {
   return window.hermesDesktop.api<ActionStatusResponse>({
-    ...profileScoped(profile),
+    ...profileScoped(),
     path: `/api/actions/${encodeURIComponent(name)}/status?lines=${Math.max(1, lines)}`
   })
 }
@@ -1873,34 +1802,6 @@ export function listMcpServers(): Promise<{ servers: McpServerSummary[] }> {
   })
 }
 
-/** Add one server to `mcp_servers` (validated + name-collision-checked
- *  server-side — the same endpoint the dashboard's add form uses). */
-export function addMcpServer(body: {
-  name: string
-  url?: string
-  command?: string
-  args?: string[]
-  env?: Record<string, string>
-  auth?: string
-}): Promise<McpServerSummary> {
-  return window.hermesDesktop.api<McpServerSummary>({
-    ...profileScoped(),
-    path: '/api/mcp/servers',
-    method: 'POST',
-    body
-  })
-}
-
-/** Remove one server from `mcp_servers` (the inline setup card's rollback
- *  when a directory install is cancelled after the config write). */
-export function removeMcpServer(name: string): Promise<{ ok: boolean }> {
-  return window.hermesDesktop.api<{ ok: boolean }>({
-    ...profileScoped(),
-    path: `/api/mcp/servers/${encodeURIComponent(name)}`,
-    method: 'DELETE'
-  })
-}
-
 export function setMcpServerEnabled(name: string, enabled: boolean): Promise<{ ok: boolean }> {
   return window.hermesDesktop.api<{ ok: boolean }>({
     ...profileScoped(),
@@ -1910,20 +1811,19 @@ export function setMcpServerEnabled(name: string, enabled: boolean): Promise<{ o
   })
 }
 
-export function getMcpCatalog(profile?: null | string): Promise<McpCatalogResponse> {
+export function getMcpCatalog(): Promise<McpCatalogResponse> {
   return window.hermesDesktop.api<McpCatalogResponse>({
-    ...profileScoped(profile),
+    ...profileScoped(),
     path: '/api/mcp/catalog'
   })
 }
 
 export function installMcpCatalogEntry(
   name: string,
-  env: Record<string, string> = {},
-  profile?: null | string
+  env: Record<string, string> = {}
 ): Promise<{ ok: boolean; name?: string; pid?: number; action?: string; background?: boolean }> {
   return window.hermesDesktop.api<{ ok: boolean; name?: string; pid?: number; action?: string; background?: boolean }>({
-    ...profileScoped(profile),
+    ...profileScoped(),
     path: '/api/mcp/catalog/install',
     method: 'POST',
     body: { name, env, enable: true },

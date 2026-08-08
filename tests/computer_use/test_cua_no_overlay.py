@@ -10,9 +10,8 @@ probe), not specific config snapshots.
 """
 
 import os
+import sys
 from unittest.mock import mock_open, patch
-
-import pytest
 
 from tools.computer_use import cua_backend
 
@@ -29,27 +28,11 @@ class TestNoOverlayFlag:
             assert cua_backend._cua_no_overlay() is True
 
 
-    @pytest.mark.macos_only
-    def test_config_load_failure_falls_through_to_auto_detect_macos(self):
-        """Unreadable config => auto-detect (macOS defaults to overlay off).
-
-        macOS-only: the auto-detect verdict IS ``sys.platform == "darwin"``,
-        so a patched platform would only re-assert the patch.
-        """
+    def test_config_load_failure_falls_through_to_auto_detect(self):
+        """Unreadable config => auto-detect (macOS defaults to disabled)."""
         with patch("hermes_cli.config.load_config",
-                   side_effect=RuntimeError("boom")):
-            assert cua_backend._cua_no_overlay() is True
-
-    @pytest.mark.linux_only
-    def test_config_load_failure_falls_through_to_auto_detect_linux(self, monkeypatch):
-        """Unreadable config must not raise; headless Linux auto-detects off.
-
-        Linux-only: the auto-detect branch here keys off ``DISPLAY`` and
-        ``/proc/version``, neither of which exists to be probed elsewhere.
-        """
-        monkeypatch.delenv("DISPLAY", raising=False)
-        with patch("hermes_cli.config.load_config",
-                   side_effect=RuntimeError("boom")):
+                   side_effect=RuntimeError("boom")), \
+             patch.object(sys, "platform", "darwin"):
             assert cua_backend._cua_no_overlay() is True
 
 

@@ -7,13 +7,13 @@ import {
   listOAuthProviders,
   pollOAuthSession,
   setEnvVar,
+  setModelAssignment,
   startOAuthLogin,
   submitOAuthCode,
   validateProviderCredential
 } from '@/hermes'
 import { isProviderSetupErrorMessage } from '@/lib/provider-setup-errors'
 import { evaluateRuntimeReadiness, type RuntimeReadinessResult } from '@/lib/runtime-readiness'
-import { setMainModelAssignment } from '@/store/cron-model-impact'
 import { notify, notifyError } from '@/store/notifications'
 import type { ModelOptionProvider, OAuthProvider, OAuthStartResponse } from '@/types/hermes'
 
@@ -318,16 +318,16 @@ async function completeWithModelConfirm(
     // config provider (e.g. anthropic from a prior failed setup) cannot make
     // setup.runtime_check validate the wrong backend after a fresh OAuth login.
     try {
-      const res = await setMainModelAssignment({
+      const res = await setModelAssignment({
+        scope: 'main',
         provider: defaults.providerSlug,
         model: defaults.defaultModel
       })
 
       notifyGatewayTools(res.gateway_tools)
-    } catch (error) {
-      onFail(error instanceof Error ? error.message : 'Hermes could not save the selected model.')
-
-      return
+    } catch {
+      // Persistence failed — still run the scoped runtime check below and
+      // show the confirm card so the user can pick something explicitly.
     }
   }
 
@@ -846,7 +846,7 @@ export async function saveOnboardingLocalEndpoint(baseUrl: string, apiKey: strin
   }
 
   try {
-    await setMainModelAssignment({ provider: 'custom', model, base_url: url, api_key: key })
+    await setModelAssignment({ scope: 'main', provider: 'custom', model, base_url: url, api_key: key })
     await ctx.requestGateway('reload.env').catch(() => undefined)
 
     const runtime = await checkRuntime(ctx)
@@ -883,7 +883,8 @@ export async function setOnboardingModel(model: string) {
   setFlow({ ...flow, currentModel: model, saving: true })
 
   try {
-    await setMainModelAssignment({
+    await setModelAssignment({
+      scope: 'main',
       provider: flow.providerSlug,
       model
     })

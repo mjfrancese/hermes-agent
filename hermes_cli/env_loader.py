@@ -685,9 +685,7 @@ def _apply_external_secret_sources(home_path: Path) -> None:
             )
         if src.result.error:
             print(f"  {src.label}: {src.result.error}", file=sys.stderr)
-            hint = _remediation_hint(
-                src.name, src.result.error_kind, cfg, scope=home_key
-            )
+            hint = _remediation_hint(src.name, src.result.error_kind, cfg)
             if hint:
                 print(f"  {src.label}: → {hint}", file=sys.stderr)
         for warn in src.result.warnings:
@@ -696,13 +694,7 @@ def _apply_external_secret_sources(home_path: Path) -> None:
         print(f"  Secret sources: {conflict}", file=sys.stderr)
 
 
-def _remediation_hint(
-    source_name: str,
-    error_kind,
-    secrets_cfg: dict,
-    *,
-    scope: str | None = None,
-) -> str:
+def _remediation_hint(source_name: str, error_kind, secrets_cfg: dict) -> str:
     """Ask the failed source for its one-line fix-it hint.
 
     Defensive wrapper: remediation() is a pure mapping and shouldn't
@@ -712,7 +704,7 @@ def _remediation_hint(
     try:
         from agent.secret_sources.registry import get_source
 
-        source = get_source(source_name, scope=scope)
+        source = get_source(source_name)
         if source is None:
             return ""
         src_cfg = secrets_cfg.get(source_name)

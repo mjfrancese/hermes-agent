@@ -18,8 +18,6 @@ import sys
 
 from rich.markup import escape as _escape
 
-from utils import base_url_host_matches
-
 
 class CLIAgentSetupMixin:
     """Agent construction + session-resume display methods for ``HermesCLI``."""
@@ -104,11 +102,7 @@ class CLIAgentSetupMixin:
             # no API key was found, use a placeholder so the OpenAI SDK
             # doesn't reject the request and local servers just ignore it.
             _source = runtime.get("source", "")
-            _has_custom_base = (
-                isinstance(base_url, str)
-                and base_url
-                and not base_url_host_matches(base_url, "openrouter.ai")
-            )
+            _has_custom_base = isinstance(base_url, str) and base_url and "openrouter.ai" not in base_url
             if _has_custom_base:
                 api_key = "no-key-required"
                 logger.debug(
@@ -221,7 +215,7 @@ class CLIAgentSetupMixin:
         return bool(
             isinstance(base_url, str)
             and base_url
-            and not base_url_host_matches(base_url, "openrouter.ai")
+            and "openrouter.ai" not in base_url
         )
 
     def _offer_first_run_setup(self) -> bool:
@@ -348,11 +342,6 @@ class CLIAgentSetupMixin:
         if self.agent is not None:
             return True
 
-        # Join the background preloaded-skills load (cli.py cmd_chat starts
-        # it when --skills/-s is passed) BEFORE the agent snapshots
-        # self.system_prompt below. No-op when nothing was requested.
-        self.finalize_preloaded_skills()
-
         _prepare_deferred_agent_startup()
         self._install_tool_callbacks()
         self._ensure_tirith_security()
@@ -457,7 +446,6 @@ class CLIAgentSetupMixin:
                     )
                 self._restore_session_cwd(session_meta, quiet=_quiet_mode)
                 self._restore_session_yolo(session_meta, quiet=_quiet_mode)
-                self._restore_session_model(session_meta, quiet=_quiet_mode)
             else:
                 if _quiet_mode:
                     print(
@@ -470,7 +458,11 @@ class CLIAgentSetupMixin:
                     )
             # Re-open the session (clear ended_at so it's active again)
             try:
-                self._session_db.reopen_session(self.session_id)
+                self._session_db._conn.execute(
+                    "UPDATE sessions SET ended_at = NULL, end_reason = NULL WHERE id = ?",
+                    (self.session_id,),
+                )
+                self._session_db._conn.commit()
             except Exception:
                 pass
         
@@ -724,7 +716,6 @@ class CLIAgentSetupMixin:
             )
             self._restore_session_cwd(session_meta)
             self._restore_session_yolo(session_meta)
-            self._restore_session_model(session_meta)
         else:
             accent_color = _accent_hex()
             self._console_print(
@@ -735,7 +726,12 @@ class CLIAgentSetupMixin:
 
         # Re-open the session (clear ended_at so it's active again)
         try:
-            self._session_db.reopen_session(self.session_id)
+            self._session_db._conn.execute(
+                "UPDATE sessions SET ended_at = NULL, end_reason = NULL "
+                "WHERE id = ?",
+                (self.session_id,),
+            )
+            self._session_db._conn.commit()
         except Exception:
             pass
 

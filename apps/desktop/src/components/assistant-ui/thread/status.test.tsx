@@ -19,10 +19,6 @@ describe('ResponseLoadingIndicator timer', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
-    // useViewedInterval gates ticking on document focus + visibility; jsdom's
-    // hasFocus() is unreliable across runners, so pin it (same as the
-    // background-sync backstop tests).
-    vi.spyOn(document, 'hasFocus').mockReturnValue(true)
     __resetElapsedTimerRegistryForTests()
   })
 
@@ -31,7 +27,6 @@ describe('ResponseLoadingIndicator timer', () => {
     $activeSessionId.set(null)
     $turnStartedAt.set(null)
     __resetElapsedTimerRegistryForTests()
-    vi.restoreAllMocks()
     vi.useRealTimers()
   })
 

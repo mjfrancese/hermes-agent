@@ -470,12 +470,10 @@ below lets you require human review before those changes land.
 
 ### When the Agent Creates Skills
 
-The system prompt asks the agent to record a non-trivial workflow with `skill_manage` for
-future reuse. In practice that covers:
-
-- When it worked out a multi-step workflow worth repeating
+- After completing a complex task (5+ tool calls) successfully
 - When it hit errors or dead ends and found the working path
 - When the user corrected its approach
+- When it discovered a non-trivial workflow
 
 ### Actions
 

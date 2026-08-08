@@ -45,18 +45,7 @@ export function useModelControls({ queryClient, requestGateway }: ModelControlsO
       includeGlobal: boolean,
       profile = $activeGatewayProfile.get()
     ) => {
-      const patch = (prev: ModelOptionsResponse | undefined) => {
-        // Selection state can update before the catalog query has resolved.
-        // Keep that optimistic cache structurally complete; the composer
-        // interprets a response without `providers` as an empty catalog.
-        const providers = prev?.providers?.length
-          ? prev.providers
-          : provider && model
-            ? [{ models: [model], name: provider, slug: provider }]
-            : []
-
-        return { ...prev, provider, model, providers }
-      }
+      const patch = (prev: ModelOptionsResponse | undefined) => ({ ...(prev ?? {}), provider, model })
 
       queryClient.setQueryData<ModelOptionsResponse>(modelOptionsQueryKey(profile, sessionId), patch)
 
@@ -218,27 +207,10 @@ export function useModelControls({ queryClient, requestGateway }: ModelControlsO
       }
 
       try {
-        // The PRIMARY profile's main agent is the profile's default — its
-        // model/provider choice IS the default, so persist it to config.yaml
-        // (model.default + model.provider) via --global. This is what makes
-        // the selection "stick": a set model.provider outranks a leftover
-        // OPENAI_API_KEY env var in resolve_provider(), so the main agent
-        // keeps the chosen (e.g. subscription) provider across restarts
-        // instead of silently falling back to an env key.
-        //
-        // Two things stay --session, deliberately:
-        //  - a SECONDARY chat tile: picking a model there must not rewrite the
-        //    profile default (the cross-session-contamination guard).
-        //  - MoA (mixture-of-agents) presets: a transient orchestration choice
-        //    that must never become the persisted global gateway default.
-        const isSessionOnlyPreset = (selection.provider || '').toLowerCase() === 'moa'
-        const persistsAsDefault = touchesPrimary && !isSessionOnlyPreset
-        const scope = persistsAsDefault ? '--global' : '--session'
-
         const result = await requestGateway<{ deferred?: boolean }>('config.set', {
           session_id: liveSessionId,
           key: 'model',
-          value: `${selection.model} --provider ${selection.provider} ${scope}`
+          value: `${selection.model} --provider ${selection.provider} --session`
         })
 
         // A pick made DURING a turn is queued by the gateway and applied at the

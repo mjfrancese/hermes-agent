@@ -10,7 +10,6 @@ This module covers the chat_completions path (/v1 endpoint).
 from typing import Any
 from urllib.parse import urlparse
 
-from hermes_cli import __version__ as _HERMES_VERSION
 from providers import register_provider
 from providers.base import OMIT_TEMPERATURE, ProviderProfile
 
@@ -87,25 +86,9 @@ class KimiProfile(ProviderProfile):
 
         # Enabled: prefer an explicit effort; only fall back to extra_body
         # thinking when no recognized effort is requested.
-        # K3 accepts low/high/max (default high). Map Hermes' wider effort
-        # vocabulary onto K3's set:
-        #   low, minimal       → low
-        #   medium, high        → high
-        #   xhigh, max, ultra   → max
-        # ref: https://www.kimi.com/code/docs/en/kimi-code/models.html
-        _K3_EFFORT_MAP = {
-            "minimal": "low",
-            "low": "low",
-            "medium": "high",
-            "high": "high",
-            "xhigh": "max",
-            "max": "max",
-            "ultra": "max",
-        }
         effort = (reasoning_config.get("effort") or "").strip().lower()
-        k3_effort = _K3_EFFORT_MAP.get(effort)
-        if k3_effort:
-            top_level["reasoning_effort"] = k3_effort
+        if effort in {"low", "medium", "high"}:
+            top_level["reasoning_effort"] = effort
         else:
             extra_body["thinking"] = {"type": "enabled"}
 
@@ -119,11 +102,7 @@ kimi = KimiProfile(
     base_url="https://api.moonshot.ai/v1",
     fixed_temperature=OMIT_TEMPERATURE,
     default_max_tokens=32000,
-    default_headers={
-        "HTTP-Referer": "https://hermes-agent.nousresearch.com",
-        "X-Title": "Hermes Agent",
-        "User-Agent": f"HermesAgent/{_HERMES_VERSION}",
-    },
+    default_headers={"User-Agent": "hermes-agent/1.0"},
     default_aux_model="kimi-k2-turbo-preview",
 )
 
@@ -134,11 +113,7 @@ kimi_cn = KimiProfile(
     base_url="https://api.moonshot.cn/v1",
     fixed_temperature=OMIT_TEMPERATURE,
     default_max_tokens=32000,
-    default_headers={
-        "HTTP-Referer": "https://hermes-agent.nousresearch.com",
-        "X-Title": "Hermes Agent",
-        "User-Agent": f"HermesAgent/{_HERMES_VERSION}",
-    },
+    default_headers={"User-Agent": "hermes-agent/1.0"},
     default_aux_model="kimi-k2-turbo-preview",
 )
 

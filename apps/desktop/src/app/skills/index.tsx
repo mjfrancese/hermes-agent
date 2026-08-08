@@ -9,12 +9,10 @@ import { CodeEditor } from '@/components/chat/code-editor'
 import { PageLoader } from '@/components/page-loader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { CountSkeleton } from '@/components/ui/skeleton'
 import {
   editLearningNode,
   getLearningNode,
-  getProfiles,
   getSkills,
   getToolsets,
   getUsageAnalytics,
@@ -70,10 +68,10 @@ const SKILLS_MODES = ['skills', 'toolsets', 'mcp', 'hub'] as const
 const SKILLS_QUERY_KEY = ['skills-list'] as const
 const TOOLSETS_QUERY_KEY = ['toolsets-list'] as const
 
-// Optimistic write-through: skill toggles/bulk/archive repaint instantly; the
-// next background refetch reconciles with the backend. (Toolsets write through
-// the profile-scoped query key directly — see handleToggleToolset.)
+// Optimistic write-through: toggles/bulk/archive repaint instantly; the next
+// background refetch reconciles with the backend.
 const setSkills = writeCache<SkillInfo[]>(SKILLS_QUERY_KEY)
+const setToolsets = writeCache<ToolsetInfo[]>(TOOLSETS_QUERY_KEY)
 
 // Per-tool call counts come from a 365-day message scan — heavy, and purely
 // cosmetic (Toolsets usage badges). Cache the result module-wide with a TTL so
@@ -193,23 +191,6 @@ export function SkillsView({ setStatusbarItemGroup: _setStatusbarItemGroup, ...p
 
   const [query, setQuery] = useState('')
 
-  // Capabilities profile-scope selector: which profile's Tools/MCP config we're
-  // editing. Defaults to the app-wide active profile; overriding it here lets
-  // the user configure ANY profile's toolsets/MCP without switching the whole
-  // app into that profile. null = the active profile (unchanged behavior).
-  const activeProfile = useStore($activeGatewayProfile)
-  const [scopeOverride, setScopeOverride] = useState<null | string>(null)
-  const scopeProfile = scopeOverride ?? activeProfile ?? null
-  const scopeKey = normalizeProfileKey(scopeProfile)
-
-  const { data: profilesData } = useQuery({
-    queryKey: ['capabilities-profiles'],
-    queryFn: getProfiles,
-    staleTime: 60_000
-  })
-
-  const profiles = profilesData?.profiles ?? []
-
   const {
     data: skills,
     isError: skillsFailed,
@@ -221,8 +202,8 @@ export function SkillsView({ setStatusbarItemGroup: _setStatusbarItemGroup, ...p
   })
 
   const { data: toolsets, isError: toolsetsFailed } = useQuery({
-    queryKey: [...TOOLSETS_QUERY_KEY, scopeKey],
-    queryFn: () => getToolsets(scopeProfile),
+    queryKey: TOOLSETS_QUERY_KEY,
+    queryFn: getToolsets,
     staleTime: 0
   })
 
@@ -372,20 +353,15 @@ export function SkillsView({ setStatusbarItemGroup: _setStatusbarItemGroup, ...p
   }
 
   async function handleToggleToolset(toolset: ToolsetInfo, enabled: boolean) {
-    const scopedToolsetKey = [...TOOLSETS_QUERY_KEY, scopeKey]
-
-    const writeScoped = (fn: (cur: ToolsetInfo[] | undefined) => ToolsetInfo[] | undefined) =>
-      queryClient.setQueryData<ToolsetInfo[]>(scopedToolsetKey, prev => fn(prev) ?? prev)
-
-    writeScoped(
+    setToolsets(
       current =>
         current?.map(row => (row.name === toolset.name ? { ...row, enabled, available: enabled } : row)) ?? current
     )
 
     try {
-      await setToolsetEnabled(toolset.name, enabled, scopeProfile)
+      await setToolsetEnabled(toolset.name, enabled)
     } catch (err) {
-      writeScoped(
+      setToolsets(
         current =>
           current?.map(row => (row.name === toolset.name ? { ...row, enabled: !enabled, available: !enabled } : row)) ??
           current
@@ -413,11 +389,8 @@ export function SkillsView({ setStatusbarItemGroup: _setStatusbarItemGroup, ...p
       }
 
       for (const row of toolsetTargets) {
-        await setToolsetEnabled(row.name, enabled, scopeProfile)
-        queryClient.setQueryData<ToolsetInfo[]>(
-          [...TOOLSETS_QUERY_KEY, scopeKey],
-          cur => cur?.map(r => (r.name === row.name ? { ...r, enabled, available: enabled } : r)) ?? cur
-        )
+        await setToolsetEnabled(row.name, enabled)
+        setToolsets(cur => cur?.map(r => (r.name === row.name ? { ...r, enabled, available: enabled } : r)) ?? cur)
         done += 1
       }
 
@@ -567,28 +540,6 @@ export function SkillsView({ setStatusbarItemGroup: _setStatusbarItemGroup, ...p
     </DetailPane>
   )
 
-  // Profile-scope selector, shown above the Tools and MCP tabs. Lets the user
-  // configure ANY profile's capabilities without switching the whole app.
-  // Only meaningful with >1 profile; hidden otherwise to avoid clutter.
-  const profileScopeSelector =
-    profiles.length > 1 ? (
-      <div className="flex items-center gap-2 border-b border-(--ui-stroke-secondary) px-3 py-2">
-        <span className="text-[0.7rem] font-medium text-(--ui-text-tertiary)">{t.skills.configuringProfile}</span>
-        <Select onValueChange={value => setScopeOverride(value)} value={scopeProfile ?? ''}>
-          <SelectTrigger className="h-7 w-56 text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {profiles.map(p => (
-              <SelectItem key={p.name} value={p.name}>
-                {p.is_default ? 'Hermes (default)' : p.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-    ) : null
-
   return (
     <PageSearchShell
       {...props}
@@ -617,12 +568,7 @@ export function SkillsView({ setStatusbarItemGroup: _setStatusbarItemGroup, ...p
       {mode === 'hub' ? (
         <SkillsHub query={query} />
       ) : mode === 'mcp' ? (
-        <div className="flex h-full flex-col">
-          {profileScopeSelector}
-          <div className="min-h-0 flex-1">
-            <McpTab gateway={gateway} key={`mcp-${scopeKey}`} profile={scopeProfile} />
-          </div>
-        </div>
+        <McpTab gateway={gateway} />
       ) : (skillsFailed || toolsetsFailed) && (!skills || !toolsets) ? (
         <PanelEmpty
           action={
@@ -686,59 +632,49 @@ export function SkillsView({ setStatusbarItemGroup: _setStatusbarItemGroup, ...p
       ) : visibleToolsets.length === 0 ? (
         capabilityEmpty('tools')
       ) : (
-        <div className="flex h-full flex-col">
-          {profileScopeSelector}
-          <div className="min-h-0 flex-1">
-            <MasterDetail split="wide">
-              <ListColumn
-                header={
-                  <ListStrip
-                    left={sortButton(toolsetsSortDesc, () => $toolsetsSortDesc.set(!$toolsetsSortDesc.get()))}
-                    right={<ListStripMenu label={t.skills.tabToolsets} toggle={bulkSwitch(allToolsetsEnabled)} />}
-                  />
-                }
-              >
-                {visibleToolsets.map(toolset => {
-                  const label = toolsetDisplayLabel(toolset)
-                  const calls = toolCalls ? toolsetCalls(toolset, toolCalls) : null
+        <MasterDetail split="wide">
+          <ListColumn
+            header={
+              <ListStrip
+                left={sortButton(toolsetsSortDesc, () => $toolsetsSortDesc.set(!$toolsetsSortDesc.get()))}
+                right={<ListStripMenu label={t.skills.tabToolsets} toggle={bulkSwitch(allToolsetsEnabled)} />}
+              />
+            }
+          >
+            {visibleToolsets.map(toolset => {
+              const label = toolsetDisplayLabel(toolset)
+              const calls = toolCalls ? toolsetCalls(toolset, toolCalls) : null
 
-                  return (
-                    <CapRow
-                      active={activeToolset?.name === toolset.name}
-                      busy={bulkBusy}
-                      enabled={toolset.enabled}
-                      key={toolset.name}
-                      meta={
-                        calls === null ? (
-                          <CountSkeleton />
-                        ) : calls > 0 ? (
-                          `×${compactNumber(calls)}`
-                        ) : (
-                          `${toolNames(toolset).length} tools`
-                        )
-                      }
-                      onSelect={() => setSelectedToolset(toolset.name)}
-                      onToggle={checked => void handleToggleToolset(toolset, checked)}
-                      subtitle={asText(toolset.description)}
-                      title={label}
-                      toggleLabel={t.skills.toggleToolset(label, !toolset.enabled)}
-                    />
-                  )
-                })}
-              </ListColumn>
-              <DetailColumn footer={t.skills.changesApplyNewSessions}>
-                {activeToolset && (
-                  <ToolsetDetail
-                    onConfiguredChange={refreshToolsets}
-                    profile={scopeProfile}
-                    toolCalls={toolCalls ?? {}}
-                    toolset={activeToolset}
-                  />
-                )}
-              </DetailColumn>
-            </MasterDetail>
-          </div>
-        </div>
+              return (
+                <CapRow
+                  active={activeToolset?.name === toolset.name}
+                  busy={bulkBusy}
+                  enabled={toolset.enabled}
+                  key={toolset.name}
+                  meta={
+                    calls === null ? (
+                      <CountSkeleton />
+                    ) : calls > 0 ? (
+                      `×${compactNumber(calls)}`
+                    ) : (
+                      `${toolNames(toolset).length} tools`
+                    )
+                  }
+                  onSelect={() => setSelectedToolset(toolset.name)}
+                  onToggle={checked => void handleToggleToolset(toolset, checked)}
+                  subtitle={asText(toolset.description)}
+                  title={label}
+                  toggleLabel={t.skills.toggleToolset(label, !toolset.enabled)}
+                />
+              )
+            })}
+          </ListColumn>
+          <DetailColumn footer={t.skills.changesApplyNewSessions}>
+            {activeToolset && (
+              <ToolsetDetail onConfiguredChange={refreshToolsets} toolCalls={toolCalls ?? {}} toolset={activeToolset} />
+            )}
+          </DetailColumn>
+        </MasterDetail>
       )}
       {archiveTarget && (
         <ArchiveSkillConfirmDialog
@@ -829,13 +765,11 @@ function SkillDetail({ onArchive, onEdit, skill }: { onArchive: () => void; onEd
 function ToolsetDetail({
   toolset,
   toolCalls,
-  onConfiguredChange,
-  profile
+  onConfiguredChange
 }: {
   toolset: ToolsetInfo
   toolCalls: Record<string, number>
   onConfiguredChange: () => void
-  profile?: null | string
 }) {
   const { t } = useI18n()
   const navigate = useNavigate()
@@ -884,12 +818,7 @@ function ToolsetDetail({
       )}
       {toolset.name === 'computer_use' && <ComputerUsePanel onConfiguredChange={onConfiguredChange} />}
       {toolset.name === 'terminal' && <TerminalBackendPanel onConfiguredChange={onConfiguredChange} />}
-      <ToolsetConfigPanel
-        key={`${toolset.name}:${normalizeProfileKey(profile)}`}
-        onConfiguredChange={onConfiguredChange}
-        profile={profile}
-        toolset={toolset.name}
-      />
+      <ToolsetConfigPanel key={toolset.name} onConfiguredChange={onConfiguredChange} toolset={toolset.name} />
     </>
   )
 }

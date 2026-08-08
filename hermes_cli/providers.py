@@ -413,7 +413,7 @@ ALIASES: Dict[str, str] = {
 _LABEL_OVERRIDES: Dict[str, str] = {
     "moa": "Mixture of Agents",
     "nous": "Nous Portal",
-    "openai-codex": "ChatGPT or Codex Subscription",
+    "openai-codex": "OpenAI Codex",
     "copilot-acp": "GitHub Copilot ACP",
     "stepfun": "StepFun Step Plan",
     "xiaomi": "Xiaomi MiMo",

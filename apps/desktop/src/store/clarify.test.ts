@@ -18,7 +18,6 @@ function clarify(sessionId: string | null, requestId: string): ClarifyRequest {
     requestId,
     question: `question-${requestId}`,
     choices: null,
-    multiSelect: false,
     sessionId
   }
 }

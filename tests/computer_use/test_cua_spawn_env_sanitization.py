@@ -48,15 +48,7 @@ def _assert_sanitized(captured):
 
 
 def _patch_windows_hide_flags(monkeypatch, module):
-    """Pin the ``windows_hide_flags()`` seam so the console-hiding assertion
-    is host-independent.
-
-    ``windows_hide_flags`` is our own platform probe (CREATE_NO_WINDOW on
-    Windows, ``0`` elsewhere). Patching that seam — rather than lying to the
-    interpreter about ``sys.platform`` — keeps the real subject of these
-    tests (does the spawn site forward its result to ``creationflags=``?)
-    covered on every host.
-    """
+    monkeypatch.setattr(module, "IS_WINDOWS", True, raising=False)
     monkeypatch.setattr(
         module, "windows_hide_flags", lambda: CREATE_NO_WINDOW, raising=False
     )

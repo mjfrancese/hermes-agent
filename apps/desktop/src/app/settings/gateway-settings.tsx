@@ -2,7 +2,6 @@ import { useStore } from '@nanostores/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
-import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tip } from '@/components/ui/tooltip'
@@ -25,7 +24,7 @@ import {
 import { coerceRemoteUrlScheme } from '@/lib/remote-url'
 import { selectableCardClass } from '@/lib/selectable-card'
 import { cn } from '@/lib/utils'
-import { notify, notifyError, readableError } from '@/store/notifications'
+import { notify, notifyError } from '@/store/notifications'
 import { $profiles, refreshActiveProfile } from '@/store/profile'
 
 import { CONTROL_TEXT } from './constants'
@@ -45,12 +44,6 @@ interface GatewaySettingsState {
   remoteOauthConnected: boolean
   remoteTokenPreview: string | null
   remoteTokenSet: boolean
-  // Whether OS-keychain-backed encryption (Electron safeStorage) is available.
-  // Default true so we never gate on a value we haven't hydrated yet.
-  secureTokenStorage: boolean
-  // Whether the currently-persisted remote token is stored as plain text on
-  // disk (opted-in on a machine without secure storage). Drives the warning banner.
-  remoteTokenPlainText: boolean
   remoteUrl: string
   cloudOrg: string
   sshHost: string
@@ -70,8 +63,6 @@ const EMPTY_STATE: GatewaySettingsState = {
   remoteOauthConnected: false,
   remoteTokenPreview: null,
   remoteTokenSet: false,
-  secureTokenStorage: true,
-  remoteTokenPlainText: false,
   remoteUrl: '',
   cloudOrg: '',
   sshHost: '',
@@ -180,11 +171,6 @@ export function GatewaySettings({ embedded = false }: { embedded?: boolean } = {
     setState(config)
     setConnectedCloudUrl(savedCloudConnectionUrl(config))
   }
-
-  // When set, the plain-text opt-in dialog is open; `apply` remembers whether
-  // the gated action was Save-for-restart (false) or Save-and-reconnect (true)
-  // so confirm resumes the right one.
-  const [plainTextConfirm, setPlainTextConfirm] = useState<null | { apply: boolean }>(null)
 
   // --- Hermes Cloud (cloud mode) state ---
   // One portal session powers discovery + the silent per-agent cascade. These
@@ -454,7 +440,7 @@ export function GatewaySettings({ embedded = false }: { embedded?: boolean } = {
     return Boolean(remoteToken.trim()) || state.remoteTokenSet
   }, [authMode, oauthConnected, remoteToken, state.remoteTokenSet, trimmedUrl])
 
-  const payload = (allowPlainTextToken?: boolean) => ({
+  const payload = () => ({
     mode: state.mode,
     profile: scope ?? undefined,
     remoteAuthMode: authMode,
@@ -467,28 +453,28 @@ export function GatewaySettings({ embedded = false }: { embedded?: boolean } = {
     sshRemoteHermesPath: state.sshRemoteHermesPath.trim(),
     // Preserve an intentional blank so an existing remote-profile mapping can
     // be cleared instead of being mistaken for an omitted field.
-    sshRemoteProfile: state.sshRemoteProfile.trim(),
-    ...(allowPlainTextToken ? { allowPlainTextToken: true } : {})
+    sshRemoteProfile: state.sshRemoteProfile.trim()
   })
 
-  // A pending Save/Apply would write a NEW token to disk in plain text when
-  // we're on a remote-like connection using token auth, the user typed a token,
-  // and this machine has no OS keyring (safeStorage unavailable). In that case
-  // we must get an explicit opt-in before persisting.
-  const wouldPersistPlainTextToken =
-    (state.mode === 'remote' || state.mode === 'cloud') &&
-    authMode !== 'oauth' &&
-    Boolean(remoteToken.trim()) &&
-    state.secureTokenStorage === false
-
-  const performSave = async (apply: boolean, allowPlainTextToken: boolean) => {
+  const save = async (apply: boolean) => {
     const seq = ++saveSeq.current
+
+    if (state.mode === 'remote' && !canUseRemote) {
+      notify({
+        kind: 'warning',
+        title: g.incompleteTitle,
+        message: authMode === 'oauth' ? g.incompleteSignIn : g.incompleteToken
+      })
+
+      return
+    }
+
     setSaving(true)
 
     try {
       const next = apply
-        ? await window.hermesDesktop.applyConnectionConfig(payload(allowPlainTextToken))
-        : await window.hermesDesktop.saveConnectionConfig(payload(allowPlainTextToken))
+        ? await window.hermesDesktop.applyConnectionConfig(payload())
+        : await window.hermesDesktop.saveConnectionConfig(payload())
 
       if (seq !== saveSeq.current) {
         return
@@ -504,13 +490,6 @@ export function GatewaySettings({ embedded = false }: { embedded?: boolean } = {
     } catch (err) {
       if (seq !== saveSeq.current) {
         return
-      }
-
-      // The plain-text opt-in path runs inside ConfirmDialog's onConfirm, which
-      // keeps the dialog open with an inline error when it throws — rethrow a
-      // readable message there so a failed save can't play the success beat.
-      if (allowPlainTextToken) {
-        throw new Error(readableError(err, apply ? g.applyFailed : g.saveFailed).message)
       }
 
       const sshError = err && typeof err === 'object' && 'sshError' in err ? String(err.sshError) : ''
@@ -539,27 +518,6 @@ export function GatewaySettings({ embedded = false }: { embedded?: boolean } = {
         setSaving(false)
       }
     }
-  }
-
-  const save = async (apply: boolean) => {
-    if (state.mode === 'remote' && !canUseRemote) {
-      notify({
-        kind: 'warning',
-        title: g.incompleteTitle,
-        message: authMode === 'oauth' ? g.incompleteSignIn : g.incompleteToken
-      })
-
-      return
-    }
-
-    // Defer to the opt-in dialog; confirm resumes with allowPlainTextToken.
-    if (wouldPersistPlainTextToken) {
-      setPlainTextConfirm({ apply })
-
-      return
-    }
-
-    await performSave(apply, false)
   }
 
   // OAuth sign-in: persist the URL + oauth mode first (so the saved config has
@@ -1357,39 +1315,25 @@ export function GatewaySettings({ embedded = false }: { embedded?: boolean } = {
 
           {/* Session-token gateways: keep the existing token entry box. */}
           {state.mode === 'remote' && authResolved && authMode === 'token' ? (
-            <>
-              <ListRow
-                action={
-                  <Input
-                    autoComplete="off"
-                    className={cn('h-8 font-mono', CONTROL_TEXT)}
-                    disabled={state.envOverride}
-                    onChange={event => setRemoteToken(event.target.value)}
-                    placeholder={
-                      state.remoteTokenSet
-                        ? g.existingToken(state.remoteTokenPreview ?? g.savedToken)
-                        : g.pasteSessionToken
-                    }
-                    type="password"
-                    value={remoteToken}
-                  />
-                }
-                description={g.tokenDesc}
-                title={g.tokenTitle}
-              />
-
-              {/* The saved token is on disk in plain text (no OS keyring). Same
-                  banner idiom as envOverride so it reads as a real warning. */}
-              {state.remoteTokenPlainText ? (
-                <div className="mt-2 flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-[length:var(--conversation-caption-font-size)] text-destructive">
-                  <AlertCircle className="mt-0.5 size-4 shrink-0" />
-                  <div>
-                    <div className="font-medium">{g.plainTextStoredTitle}</div>
-                    <div className="mt-1 leading-5">{g.plainTextStoredDesc}</div>
-                  </div>
-                </div>
-              ) : null}
-            </>
+            <ListRow
+              action={
+                <Input
+                  autoComplete="off"
+                  className={cn('h-8 font-mono', CONTROL_TEXT)}
+                  disabled={state.envOverride}
+                  onChange={event => setRemoteToken(event.target.value)}
+                  placeholder={
+                    state.remoteTokenSet
+                      ? g.existingToken(state.remoteTokenPreview ?? g.savedToken)
+                      : g.pasteSessionToken
+                  }
+                  type="password"
+                  value={remoteToken}
+                />
+              }
+              description={g.tokenDesc}
+              title={g.tokenTitle}
+            />
           ) : null}
         </div>
       ) : null}
@@ -1572,24 +1516,6 @@ export function GatewaySettings({ embedded = false }: { embedded?: boolean } = {
           />
         </div>
       )}
-
-      {/* Plain-text token opt-in: gated when secure storage is unavailable and a
-          new token would be persisted. Confirm resumes the remembered save/apply. */}
-      <ConfirmDialog
-        confirmLabel={g.plainTextConfirmAction}
-        description={g.plainTextConfirmDesc}
-        destructive
-        onClose={() => setPlainTextConfirm(null)}
-        onConfirm={async () => {
-          if (!plainTextConfirm) {
-            return
-          }
-
-          await performSave(plainTextConfirm.apply, true)
-        }}
-        open={plainTextConfirm !== null}
-        title={g.plainTextConfirmTitle}
-      />
     </SettingsContent>
   )
 }

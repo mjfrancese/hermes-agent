@@ -25,7 +25,6 @@ GUI_TOOLS = {
     "read_terminal",
     "read_window_below",
     "react_to_message",
-    "setup_mcp",
 }
 
 

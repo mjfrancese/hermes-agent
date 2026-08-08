@@ -144,10 +144,11 @@ export default async function beforePack(context) {
         await stageNodePty({ platform, arch: archName })
         console.log(`[before-pack] re-staged node-pty for target ${platform}-${archName}`)
       }
-      // The macOS helper is universal, while Windows bindings are arch-specific.
-      // Pass the target arch so an ARM64 package never stages an x64 binding.
-      stageGetWindows({ platform, arch: archName })
-      console.log(`[before-pack] re-staged get-windows for target ${platform}-${archName}`)
+      // get-windows' native payload is per-platform, not per-arch (the macOS
+      // helper is universal, Windows stages every prebuilt binding dir), so
+      // it re-stages for the universal target too.
+      stageGetWindows({ platform })
+      console.log(`[before-pack] re-staged get-windows for target ${platform}`)
     }
   } catch (err) {
     // This one SHOULD fail the build — a missing/wrong native binary for the

@@ -94,9 +94,7 @@ function isUpdateToastSnoozed(): boolean {
 // v3: requires approvals.mode config RPCs and session.info reconciliation.
 // v4: requires explicit Fast-off session creation and session-scoped Fast edits.
 // v5: requires raised WebSocket frame size for large one-shot file.attach.
-// v6: requires key-addressed plugins.manage rows (keyless rows render
-//     read-only in Settings → Plugins).
-const REQUIRED_BACKEND_CONTRACT = 6
+const REQUIRED_BACKEND_CONTRACT = 5
 const SKEW_TOAST_ID = 'backend-contract-skew'
 // The contract check runs on every session.resume (applyRuntimeInfo), so
 // without a snooze the warning re-popped on every thread the user opened, even
@@ -206,11 +204,7 @@ export function maybeNotifyUpdateAvailable(status: DesktopUpdateStatus | null) {
     return
   }
 
-  const behind = typeof status.behind === 'number' ? status.behind : null
-
-  // behind === null means "update available, exact count unknown" (shallow
-  // clone). That still deserves the toast — just with count-free copy.
-  if ((behind ?? 0) <= 0 && !status.updateAvailable) {
+  if ((status.behind ?? 0) <= 0) {
     return
   }
 
@@ -221,6 +215,8 @@ export function maybeNotifyUpdateAvailable(status: DesktopUpdateStatus | null) {
   if ($updateApply.get().applying) {
     return
   }
+
+  const behind = status.behind ?? 0
 
   notify({
     action: {
@@ -234,10 +230,7 @@ export function maybeNotifyUpdateAvailable(status: DesktopUpdateStatus | null) {
     icon: 'gift',
     id: UPDATE_TOAST_ID,
     kind: 'info',
-    message:
-      behind !== null && behind > 0
-        ? translateNow('notifications.updateReadyMessage', behind)
-        : translateNow('notifications.updateReadyMessageUnknown'),
+    message: translateNow('notifications.updateReadyMessage', behind),
     onDismiss: () => snoozeUpdateToast(),
     title: translateNow('notifications.updateReadyTitle')
   })
